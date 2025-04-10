@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 
 export default function Page() {
   return (
@@ -31,9 +32,11 @@ export default function Page() {
               <button className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition-colors">
                 시작하기
               </button>
-              <button className="bg-white hover:bg-gray-100 text-blue-500 border border-blue-500 px-6 py-3 rounded-lg font-medium transition-colors">
-                더 알아보기
-              </button>
+              <Link href="/about">
+                <button className="bg-white hover:bg-gray-100 text-blue-500 border border-blue-500 px-6 py-3 rounded-lg font-medium transition-colors">
+                  더 알아보기
+                </button>
+              </Link>
             </div>
           </div>
         </div>
