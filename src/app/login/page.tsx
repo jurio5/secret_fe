@@ -68,7 +68,7 @@ function LoginContent() {
           </div>
           
           <div className="mt-8 text-center text-sm text-gray-400">
-            <p>처음 방문하시나요? 소셜 로그인 시 자동으로 회원가입됩니다.</p>
+            <p>처음 방문하시나요? 소셜 로그인 시 자동으로 회원가입이 됩니다.</p>
           </div>
         </div>
         
