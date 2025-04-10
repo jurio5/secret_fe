@@ -17,7 +17,7 @@ export default function Page() {
     setTimeout(() => {
       setShowResult(true);
       setResultAnimating(false);
-    }, 300);
+    }, 100);
     
     setTimeout(() => {
       setShowResult(false);
