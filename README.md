@@ -1,10 +1,3 @@
-# Quizzle 프론트엔드
-
-이 프로젝트는 Next.js 기반의 Quizzle 프론트엔드 애플리케이션입니다.
-
-## 프로젝트 구조
-
-```
 frontend/
 │
 ├─ node_modules/
@@ -62,17 +55,22 @@ npm run start
 
 ## 환경 설정
 
-`.env` 파일을 프로젝트 루트에 생성하고 필요한 환경 변수를 설정하세요.
+### 로컬 개발 환경
+
+`.env.development` 파일을 프로젝트 루트에 생성하고 필요한 환경 변수를 설정하세요.
 
 ```
-NEXT_PUBLIC_API_URL=http://localhost:8080
+NEXT_PUBLIC_NODE_ENV=development
+NEXT_PUBLIC_WAS_HOST=http://localhost:8080
+NEXT_PUBLIC_GOOGLE_AUTH_CLIENT_ID=your-google-client-id
+NEXT_PUBLIC_KAKAO_AUTH_CLIENT_ID=your-kakao-client-id
+NEXT_PUBLIC_REQUEST_TIMEOUT=60000
 ```
 
-## OAuth2 인증 흐름
+### 프로덕션 환경 (Vercel)
 
-1. 사용자가 OAuth 로그인 버튼 클릭
-2. 외부 OAuth 제공자로 리다이렉트
-3. 인증 후 `/oauth/callback` 페이지로 리다이렉트
-4. `OAuth2RedirectHandler` 컴포넌트에서 처리:
-   - 신규 가입: `/join` 페이지로 이동
-   - 로그인 성공: 역할에 따라 적절한 페이지로 이동
+프로덕션 환경에서는 Vercel 대시보드의 환경 변수 설정을 사용합니다:
+
+## 배포
+
+이 프로젝트는 Vercel을 통해 배포됩니다. 메인 배포 URL: [secret-fe.vercel.app](https://secret-fe.vercel.app/)
