@@ -18,7 +18,6 @@ function LobbyContent() {
       alert(res.error.msg);
       return;
     }
-
     setRooms(res.data.data);
   }
 
