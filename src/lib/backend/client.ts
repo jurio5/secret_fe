@@ -5,6 +5,10 @@ import type { paths } from "@/lib/backend/apiV1/schema";
 const client = createClient<paths>({
   baseUrl: process.env.NEXT_PUBLIC_WAS_HOST,
   credentials: "include",
+  headers: {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+  },
 });
 
 export default client;
