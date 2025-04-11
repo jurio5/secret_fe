@@ -2,27 +2,30 @@
 
 import { useEffect, Suspense, useState } from "react";
 import AppLayout from "@/components/common/AppLayout";
+import client from "@/lib/backend/client";
+import { components } from "@/lib/backend/apiV1/schema";
 
 function LobbyContent() {
-  const [rooms, setRooms] = useState<any>([]);
+  const [rooms, setRooms] = useState<components["schemas"]["RoomResponse"][]>(
+    []
+  );
 
   useEffect(() => {
-    const wasHost = process.env.NEXT_PUBLIC_WAS_HOST;
+    client.GET("/api/v1/rooms").then((res) => {
+      if (res.error) {
+        alert(res.error.msg);
+        return;
+      }
 
-    fetch(`${wasHost}/api/v1/rooms`, {
-      credentials: "include",
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        setRooms(data.data);
-      });
+      setRooms(res.data.data);
+    });
   }, []);
 
   return (
     <div className="text-white">
       <h1>로비 페이지</h1>
 
-      {rooms.map((room: any) => (
+      {rooms.map((room) => (
         <div key={room.id}>
           <h2>{room.title}</h2>
         </div>

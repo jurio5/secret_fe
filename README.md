@@ -75,3 +75,9 @@ NEXT_PUBLIC_REQUEST_TIMEOUT=60000
 ## 배포
 
 이 프로젝트는 Vercel을 통해 배포됩니다. 메인 배포 URL: [secret-fe.vercel.app](https://secret-fe.vercel.app/)
+
+## 통신관련 스키마 업데이트
+
+```bash
+npx --package typescript --package openapi-typescript openapi-typescript http://localhost:8080/v3/api-docs/api -o src/lib/backend/apiV1/schema.d.ts --properties-required-by-default
+```
