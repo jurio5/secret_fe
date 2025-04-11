@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import AppLayout from "@/components/common/AppLayout";
 
 export default function Page() {
@@ -9,9 +9,11 @@ export default function Page() {
   const correctAnswer = "B";
   
   const [resultAnimating, setResultAnimating] = useState(false);
+  const selectedAnswerRef = useRef<string | null>(null);
   
   const handleAnswerClick = (option: string) => {
     setSelectedAnswer(option);
+    selectedAnswerRef.current = option;
     setResultAnimating(true);
     
     setTimeout(() => {
@@ -21,7 +23,10 @@ export default function Page() {
     
     setTimeout(() => {
       setShowResult(false);
-      setSelectedAnswer(null);
+      setTimeout(() => {
+        setSelectedAnswer(null);
+        selectedAnswerRef.current = null;
+      }, 300);
     }, 3000);
   };
   
@@ -94,7 +99,7 @@ export default function Page() {
                       <div className="text-sm text-gray-300">퀴즐</div>
                     </div>
                     <div className="text-sm text-blue-400">
-                      {showResult && selectedAnswer === correctAnswer ? '1300점' : '1200점'}
+                      {showResult && selectedAnswerRef.current === correctAnswer ? '1300점' : '1200점'}
                     </div>
                   </div>
                   
@@ -108,8 +113,8 @@ export default function Page() {
                     <div className="font-medium text-white mb-4">세계에서 가장 긴 강은 무엇일까요?</div>
                     
                     <div className={`overflow-hidden transition-all duration-300 ${showResult ? 'max-h-[100px]' : 'max-h-0'}`}>
-                      <div className={`p-2 rounded-lg text-sm ${selectedAnswer === correctAnswer ? 'bg-green-900/20 text-green-300' : 'bg-red-900/20 text-red-300'}`}>
-                        {selectedAnswer === correctAnswer 
+                      <div className={`p-2 rounded-lg text-sm ${selectedAnswerRef.current === correctAnswer ? 'bg-green-900/20 text-green-300' : 'bg-red-900/20 text-red-300'}`}>
+                        {selectedAnswerRef.current === correctAnswer 
                           ? '정답입니다! 나일강은 길이 6,650km로 세계에서 가장 긴 강입니다.' 
                           : `오답입니다! 정답은 B. 나일 강입니다. 길이 6,650km로 세계에서 가장 긴 강입니다.`}
                       </div>
