@@ -31,6 +31,19 @@ body {
   padding-top: 90px; /* Navigation 높이에 맞춰 조정 */
 }
 
+:root {
+  --static-router-error-display: none !important;
+}
+
+#nextjs-portal-dev-overlay .error-message[data-message*="Static Router"] {
+  display: var(--static-router-error-display) !important;
+}
+
+.nextjs-portal-dev-overlay-error {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
