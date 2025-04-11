@@ -12,24 +12,28 @@ const OAuth2RedirectHandler = ({ onLoginSuccess }: OAuth2RedirectProps) => {
 
   useEffect(() => {
     const handleOAuth2Redirect = async () => {
+      
       const searchParams = new URLSearchParams(window.location.search);
       const status = searchParams.get("status");
+      
 
       try {
+        if (!status) {
+          console.error("상태 정보가 없습니다!");
+          throw new Error("OAuth 인증 상태 정보가 없습니다");
+        }
+        
         switch (status) {
           case "REGISTER": {
-            const provider = searchParams.get("provider");
-            const oauthId = searchParams.get("oauthId");
-
-            if (!provider || !oauthId) {
-              throw new Error("OAuth 정보가 누락되었습니다.");
-            }
-
-            router.push(
-              `/join?provider=${encodeURIComponent(
-                provider
-              )}&oauthId=${encodeURIComponent(oauthId)}`
-            );
+            onLoginSuccess?.();
+            
+            const lobbyUrl = `/lobby?status=${encodeURIComponent(status)}`;
+            
+            document.cookie = `oauth_status=${status}; path=/`;
+            
+            localStorage.setItem('oauth_status', status);
+            
+            window.location.href = lobbyUrl;
             break;
           }
 
@@ -37,25 +41,24 @@ const OAuth2RedirectHandler = ({ onLoginSuccess }: OAuth2RedirectProps) => {
             onLoginSuccess?.();
             const roleData = getRoleFromCookie();
             if (roleData?.role === "ADMIN") {
-              router.push("/admin");
+              window.location.href = "/admin";
               break;
             }
-            router.push("/");
+            window.location.href = "/lobby";
             break;
           }
 
           default:
+            console.error("알 수 없는 상태:", status);
             throw new Error("잘못된 인증 상태입니다.");
         }
       } catch (error) {
         console.error("OAuth2 리다이렉트 처리 중 오류 발생:", error);
-        router.push(
-          `/login?error=${encodeURIComponent(
-            error instanceof Error
-              ? error.message
-              : "인증 처리 중 오류가 발생했습니다."
-          )}`
-        );
+        window.location.href = `/login?error=${encodeURIComponent(
+          error instanceof Error
+            ? error.message
+            : "인증 처리 중 오류가 발생했습니다."
+        )}`;
       }
     };
 
@@ -65,6 +68,7 @@ const OAuth2RedirectHandler = ({ onLoginSuccess }: OAuth2RedirectProps) => {
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900" />
+      <p className="ml-3 text-gray-500">OAuth 인증 처리 중...</p>
     </div>
   );
 };
