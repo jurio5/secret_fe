@@ -1,113 +1,148 @@
 "use client";
 
 import SockJS from "sockjs-client";
-import { Client } from "@stomp/stompjs";
+import { Client, IMessage, StompSubscription } from "@stomp/stompjs";
 
-// 클라이언트 사이드에서만 실행될 변수와 함수들
+const isBrowser = typeof window !== "undefined";
+
 let socket: any;
-let stompClient: any;
+let stompClient: Client = new Client();
 let stompClientConnected = false;
+let wasConnected = false;
 const subscriptionQueue: {
   destination: string;
   callback: (message: any) => void;
 }[] = [];
-const activeSubscriptions: { [key: string]: any } = {};
+const activeSubscriptions: { [key: string]: StompSubscription } = {};
 const publishQueue: {
   destination: string;
   body: any;
 }[] = [];
+const subscriptionCallbacks: { [key: string]: (message: any) => void } = {};
 
-// 브라우저 환경인지 확인
-const isBrowser = typeof window !== 'undefined';
+const reconnectDelay = 5000;
+const maxReconnectAttempts = 10;
+let reconnectAttempts = 0;
 
 if (isBrowser) {
-  // 클라이언트 사이드에서만 실행될 코드
   const getWebSocketUrl = () => {
     const wsHost = process.env.NEXT_PUBLIC_WAS_WS_HOST;
-    
+     
     if (!wsHost) {
       console.debug('NEXT_PUBLIC_WAS_WS_HOST가 설정되지 않았습니다. 기본값을 사용합니다.');
       const wasHost = process.env.NEXT_PUBLIC_WAS_HOST || 'http://localhost:8080';
       return `${wasHost}/ws`;
     }
-    
+     
     return wsHost;
   };
 
-  // SockJS 인스턴스 생성
   socket = new SockJS(getWebSocketUrl());
 
-  // STOMP 클라이언트 설정
   stompClient = new Client({
     webSocketFactory: () => socket,
     connectHeaders: {},
     debug: (str) => {
       console.log("[STOMP]", str);
     },
-    reconnectDelay: 5000,
-    onConnect: () => {
-      console.log("✅ WebSocket 연결 성공");
-      stompClientConnected = true;
-
-      // 연결 성공 시 대기 중인 구독 처리
-      while (subscriptionQueue.length > 0) {
-        const { destination, callback } = subscriptionQueue.shift()!;
-        performSubscribe(destination, callback);
-      }
-
-      // 연결 성공 시 대기 중인 발행 처리
-      while (publishQueue.length > 0) {
-        const { destination, body } = publishQueue.shift()!;
-        performPublish(destination, body);
-      }
-    },
-    onStompError: (frame) => {
-      console.error("❌ STOMP 오류:", frame.headers["message"]);
-      console.error("상세 내용:", frame.body);
-    },
+    reconnectDelay,
+    heartbeatIncoming: 4000,
+    heartbeatOutgoing: 4000
   });
 
-  // STOMP 클라이언트 활성화
+  stompClient.onConnect = function () {
+    console.log('STOMP 연결 성공');
+    stompClientConnected = true;
+    reconnectAttempts = 0;
+
+    if (wasConnected) {
+      restoreSubscriptions();
+    }
+    
+    while (publishQueue.length > 0) {
+      const { destination, body } = publishQueue.shift()!;
+      performPublish(destination, body);
+    }
+    
+    wasConnected = true;
+  };
+
+  stompClient.onWebSocketClose = function (evt) {
+    console.log('STOMP 웹소켓 연결 종료:', evt);
+    stompClientConnected = false;
+    
+    console.log(`재연결 시도 중... (${reconnectAttempts + 1}/${maxReconnectAttempts})`);
+    reconnectAttempts++;
+    
+    if (reconnectAttempts >= maxReconnectAttempts) {
+      console.error('최대 재연결 시도 횟수 초과. 연결 실패.');
+      stompClient.deactivate();
+    }
+  };
+
+  stompClient.onStompError = function (frame) {
+    console.error('❌ STOMP 오류:', frame.headers['message']);
+    console.error('추가 정보:', frame.body);
+  };
+
   stompClient.activate();
 }
 
-// 실제 구독을 수행하는 내부 함수
+const restoreSubscriptions = () => {
+  if (!isBrowser || !stompClientConnected) return;
+  
+  console.log('이전 구독 복원 중...');
+  
+  Object.keys(subscriptionCallbacks).forEach((destination) => {
+    const callback = subscriptionCallbacks[destination];
+    performSubscribe(destination, callback);
+  });
+  
+  console.log('구독 복원 완료');
+};
+
 const performSubscribe = (
   destination: string,
   callback: (message: any) => void
 ) => {
-  if (!isBrowser) return;
+  if (!isBrowser || !stompClientConnected) return null;
   
-  const subscription = stompClient.subscribe(destination, (message: any) => {
-    callback(JSON.parse(message.body));
+  const subscription = stompClient.subscribe(destination, (message: IMessage) => {
+    try {
+      const parsedBody = JSON.parse(message.body);
+      callback(parsedBody);
+    } catch (e) {
+      callback(message.body);
+    }
   });
+  
   activeSubscriptions[destination] = subscription;
+  return subscription;
 };
 
-// 구독 함수
 const subscribe = (destination: string, callback: (message: any) => void) => {
   if (!isBrowser) return;
   
+  subscriptionCallbacks[destination] = callback;
+  
   if (!stompClientConnected) {
-    // 연결되지 않은 경우 큐에 추가
-    subscriptionQueue.push({ destination, callback });
-  } else {
-    // 이미 연결된 경우 바로 구독
-    performSubscribe(destination, callback);
+    console.log(`'${destination}'에 구독 예약 (연결 대기 중)`);
+    return;
   }
+  
+  return performSubscribe(destination, callback);
 };
 
-// 구독 해제 함수
 const unsubscribe = (destination: string) => {
   if (!isBrowser) return;
   
   if (activeSubscriptions[destination]) {
     activeSubscriptions[destination].unsubscribe();
     delete activeSubscriptions[destination];
+    delete subscriptionCallbacks[destination];
   }
 };
 
-// 실제 발행을 수행하는 내부 함수
 const performPublish = (
   destination: string,
   body: any
@@ -120,40 +155,32 @@ const performPublish = (
   });
 };
 
-// 발행 함수
 const publish = (destination: string, body: any) => {
   if (!isBrowser) return;
   
   if (!stompClientConnected) {
-    // 연결되지 않은 경우 큐에 추가
     publishQueue.push({ destination, body });
   } else {
-    // 이미 연결된 경우 바로 발행
     performPublish(destination, body);
   }
 };
 
-// 연결 상태 확인 함수
 const isConnected = () => {
   return stompClientConnected;
 };
 
-// 연결 대기 함수
 const waitForConnection = (timeout = 5000): Promise<void> => {
   if (!isBrowser) return Promise.resolve();
   
   return new Promise((resolve, reject) => {
-    // 이미 연결된 경우
     if (stompClientConnected) {
       return resolve();
     }
     
-    // 타임아웃 설정
     const timeoutId = setTimeout(() => {
       reject(new Error("웹소켓 연결 타임아웃"));
     }, timeout);
     
-    // 연결 확인 인터벌
     const checkInterval = 100;
     const intervalId = setInterval(() => {
       if (stompClientConnected) {
