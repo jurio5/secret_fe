@@ -4,21 +4,34 @@ import { useEffect, Suspense, useState } from "react";
 import AppLayout from "@/components/common/AppLayout";
 import client from "@/lib/backend/client";
 import { components } from "@/lib/backend/apiV1/schema";
+import { subscribe, unsubscribe, publish } from "@/lib/backend/stompClient";
 
 function LobbyContent() {
   const [rooms, setRooms] = useState<components["schemas"]["RoomResponse"][]>(
     []
   );
 
-  useEffect(() => {
-    client.GET("/api/v1/rooms").then((res) => {
-      if (res.error) {
-        alert(res.error.msg);
-        return;
-      }
+  async function loadRooms() {
+    const res = await client.GET("/api/v1/rooms");
 
-      setRooms(res.data.data);
+    if (res.error) {
+      alert(res.error.msg);
+      return;
+    }
+
+    setRooms(res.data.data);
+  }
+
+  useEffect(() => {
+    loadRooms();
+
+    subscribe("/topic/lobby", (_) => {
+      loadRooms();
     });
+
+    return () => {
+      unsubscribe("/topic/lobby");
+    };
   }, []);
 
   return (
