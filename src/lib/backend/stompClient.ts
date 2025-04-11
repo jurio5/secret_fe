@@ -133,5 +133,37 @@ const publish = (destination: string, body: any) => {
   }
 };
 
+// 연결 상태 확인 함수
+const isConnected = () => {
+  return stompClientConnected;
+};
+
+// 연결 대기 함수
+const waitForConnection = (timeout = 5000): Promise<void> => {
+  if (!isBrowser) return Promise.resolve();
+  
+  return new Promise((resolve, reject) => {
+    // 이미 연결된 경우
+    if (stompClientConnected) {
+      return resolve();
+    }
+    
+    // 타임아웃 설정
+    const timeoutId = setTimeout(() => {
+      reject(new Error("웹소켓 연결 타임아웃"));
+    }, timeout);
+    
+    // 연결 확인 인터벌
+    const checkInterval = 100;
+    const intervalId = setInterval(() => {
+      if (stompClientConnected) {
+        clearTimeout(timeoutId);
+        clearInterval(intervalId);
+        resolve();
+      }
+    }, checkInterval);
+  });
+};
+
 export default stompClient;
-export { subscribe, unsubscribe, publish };
+export { subscribe, unsubscribe, publish, isConnected, waitForConnection };
