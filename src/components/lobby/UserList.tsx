@@ -20,6 +20,14 @@ interface UserListProps {
 const UserList: React.FC<UserListProps> = ({ users: initialUsers, isConnected }) => {
   const [users, setUsers] = useState<User[]>(initialUsers || []);
 
+  // 초기 사용자 데이터가 변경되면 상태 업데이트
+  useEffect(() => {
+    if (initialUsers && initialUsers.length > 0) {
+      console.log('초기 사용자 데이터 업데이트됨:', initialUsers);
+      setUsers(initialUsers);
+    }
+  }, [initialUsers]);
+
   // 디버깅을 위한 로그 추가
   useEffect(() => {
     console.log('UserList 컴포넌트 마운트됨');
@@ -91,13 +99,6 @@ const UserList: React.FC<UserListProps> = ({ users: initialUsers, isConnected })
     };
   }, [isConnected]);
   
-  // 기본 더미 데이터와 실제 사용자를 병합
-  const displayUsers = users.length > 0 ? users : [
-    { id: 1, nickname: "사용자1", color: "purple-300", status: "online" },
-    { id: 2, nickname: "사용자2", color: "green-300", status: "online" },
-    { id: 3, nickname: "사용자3", color: "blue-300", status: "online" }
-  ];
-  
   // 디버깅: 사용자 목록 상태 변화 감지
   useEffect(() => {
     console.log('사용자 목록 상태 변경됨:', users);
@@ -106,6 +107,18 @@ const UserList: React.FC<UserListProps> = ({ users: initialUsers, isConnected })
     const usingDummyData = users.length === 0;
     console.log('더미 데이터 사용 중:', usingDummyData ? '예' : '아니오');
   }, [users]);
+  
+  // 실제 데이터에 더미 데이터를 추가하여 항상 표시
+  const displayUsers = [
+    // 실제 사용자 (서버에서 받아온 데이터)
+    ...users,
+    // 더미 데이터 (개발용, 실제 데이터가 없을 때만 표시)
+    ...(users.length === 0 ? [
+      { id: 1, nickname: "사용자1", color: "purple-300", status: "online" },
+      { id: 2, nickname: "사용자2", color: "green-300", status: "online" },
+      { id: 3, nickname: "사용자3", color: "blue-300", status: "online" }
+    ] : [])
+  ];
   
   // 주기적으로 접속자 목록 갱신 요청 보내기
   useEffect(() => {
