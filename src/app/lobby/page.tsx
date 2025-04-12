@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, Suspense, useState } from "react";
+import { useEffect, Suspense, useState, useRef } from "react";
 import AppLayout from "@/components/common/AppLayout";
 import client from "@/lib/backend/client";
 import { components } from "@/lib/backend/apiV1/schema";
@@ -69,6 +69,12 @@ function LobbyContent() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [toast, setToast] = useState<ToastProps | null>(null);
   const [isChangingNickname, setIsChangingNickname] = useState<boolean>(false);
+  
+  // 채팅 관련 상태 추가
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [newChatMessage, setNewChatMessage] = useState<string>("");
+  const [showChat, setShowChat] = useState<boolean>(true);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // 세션 무효화 오류 확인 함수
   const checkSessionError = (error: any): boolean => {
@@ -504,6 +510,7 @@ function LobbyContent() {
       console.log("로비 페이지 언마운트: 웹소켓 구독 해제");
       unsubscribe("/topic/lobby");
       unsubscribe("/topic/lobby/users");
+      unsubscribe("/topic/lobby/chat");
       
       // 페이지 벗어날 때 세션 변경 여부 체크
       if (currentUser && currentUser.nickname && 
@@ -621,8 +628,57 @@ function LobbyContent() {
     setSelectedUser(null);
   };
 
+  // 채팅 메시지 전송 함수
+  const handleSendChatMessage = () => {
+    if (!newChatMessage.trim() || !currentUser) return;
+    
+    // 채팅 메시지 발행
+    publish("/app/lobby/chat", newChatMessage);
+    setNewChatMessage("");
+  };
+  
+  // 채팅 입력창 키 이벤트 핸들러
+  const handleChatKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendChatMessage();
+    }
+  };
+
+  // 채팅 구독 설정
+  useEffect(() => {
+    // 시스템 초기 메시지
+    setChatMessages([{
+      type: "SYSTEM",
+      content: "로비 채팅에 연결되었습니다. 안녕하세요! 👋",
+      senderId: "system",
+      senderName: "System",
+      timestamp: Date.now(),
+      roomId: "lobby"
+    }]);
+    
+    // 로비 채팅 구독
+    subscribe("/topic/lobby/chat", (message) => {
+      setChatMessages((prevMessages) => [...prevMessages, {
+        ...message,
+        avatarUrl: message.senderId && userProfileCache[parseInt(message.senderId)]?.avatarUrl
+      }]);
+    });
+    
+    return () => {
+      unsubscribe("/topic/lobby/chat");
+    };
+  }, []);
+  
+  // 새 메시지가 올 때마다 스크롤 이동
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 flex flex-col h-full">
       {/* 토스트 메시지 표시 */}
       {toast && (
         <Toast
@@ -633,7 +689,7 @@ function LobbyContent() {
         />
       )}
       
-      <div className="flex flex-col lg:flex-row gap-8">
+      <div className="flex flex-col lg:flex-row gap-8 flex-grow mb-4">
         <div className="flex-grow">
           <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-xl p-6 mb-8">
             <h1 className="text-3xl font-bold text-white mb-4">로비</h1>
@@ -748,6 +804,136 @@ function LobbyContent() {
             </div>
           </div>
         </div>
+      </div>
+      
+      {/* 채팅 영역 */}
+      <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-xl mt-auto">
+        <div className="flex items-center justify-between p-3 border-b border-gray-700">
+          <div className="flex items-center">
+            <h3 className="text-white font-medium">로비 채팅</h3>
+            <div className="flex items-center ml-2">
+              <div className={`w-2 h-2 rounded-full mr-1 ${isConnected ? 'bg-green-400' : 'bg-gray-400'}`}></div>
+              <span className="text-xs text-gray-400">{activeUsers.length}명 접속 중</span>
+            </div>
+          </div>
+          <button 
+            onClick={() => setShowChat(!showChat)}
+            className="bg-gray-700 hover:bg-gray-600 p-1 rounded text-white"
+          >
+            {showChat ? (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+              </svg>
+            )}
+          </button>
+        </div>
+        
+        {showChat && (
+          <>
+            <div 
+              ref={chatContainerRef}
+              className="h-48 overflow-y-auto p-3 space-y-2 bg-gray-900/30"
+            >
+              {chatMessages.map((msg, index) => (
+                <div 
+                  key={index} 
+                  className={`${
+                    msg.type === "SYSTEM" 
+                      ? "flex justify-center" 
+                      : "flex"
+                  }`}
+                >
+                  {msg.type === "SYSTEM" ? (
+                    <div className="bg-gray-800/70 text-gray-300 text-xs py-1 px-3 rounded-full">
+                      {msg.content}
+                    </div>
+                  ) : (
+                    <>
+                      {/* 시간 표시 */}
+                      <div className="flex-shrink-0 text-xs text-gray-500 mr-2 mt-1 w-10">
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                      
+                      {/* 발신자 아바타 */}
+                      <div className="flex-shrink-0 mr-2">
+                        <div className="w-6 h-6 rounded-full overflow-hidden bg-gray-800">
+                          {msg.avatarUrl ? (
+                            <img 
+                              src={msg.avatarUrl} 
+                              alt={msg.senderName}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                // 이미지 로드 실패 시 기본 아바타 표시
+                                (e.target as HTMLImageElement).src = DEFAULT_AVATAR;
+                              }}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-blue-500 text-white text-xs font-bold">
+                              {msg.senderName.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* 닉네임과 메시지 */}
+                      <div className="flex-grow">
+                        <div className="flex items-center gap-1 leading-none">
+                          <span className={`font-medium text-sm ${
+                            currentUser && msg.senderId === currentUser.id.toString() 
+                              ? "text-blue-400" 
+                              : "text-gray-300"
+                          }`}>
+                            {msg.senderName}
+                          </span>
+                          {currentUser && msg.senderId === currentUser.id.toString() && (
+                            <span className="text-xs bg-blue-900/30 text-blue-400 px-1 rounded">나</span>
+                          )}
+                        </div>
+                        <div className="text-sm text-gray-200 break-words">{msg.content}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+            
+            <div className="p-3 border-t border-gray-700">
+              <div className="flex items-center">
+                <input
+                  type="text"
+                  value={newChatMessage}
+                  onChange={(e) => setNewChatMessage(e.target.value)}
+                  onKeyDown={handleChatKeyDown}
+                  placeholder={currentUser ? "메시지를 입력하세요..." : "로그인 후 채팅 가능합니다"}
+                  className="flex-grow bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 text-sm placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  disabled={!currentUser}
+                />
+                <button
+                  onClick={handleSendChatMessage}
+                  disabled={!newChatMessage.trim() || !currentUser}
+                  className={`ml-2 p-2 rounded-lg ${
+                    newChatMessage.trim() && currentUser
+                      ? "bg-blue-600 hover:bg-blue-700"
+                      : "bg-gray-700 cursor-not-allowed"
+                  }`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </button>
+              </div>
+              {!currentUser && (
+                <div className="text-xs text-red-400 mt-1">
+                  로그인 후 채팅에 참여할 수 있습니다.
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* 닉네임 변경 모달 */}
