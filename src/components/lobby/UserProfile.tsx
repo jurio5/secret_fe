@@ -3,14 +3,14 @@
 import React from 'react';
 
 interface UserProfileProps {
-  username: string;
+  nickname: string;
   level: number;
   points: number;
   rank: string;
 }
 
 const UserProfile: React.FC<UserProfileProps> = ({
-  username = "테스터박",
+  nickname = "테스터박",
   level = 1,
   points = 0,
   rank = "Bronze"
@@ -24,7 +24,7 @@ const UserProfile: React.FC<UserProfileProps> = ({
           </svg>
         </div>
         <div>
-          <h3 className="font-bold text-white">{username}</h3>
+          <h3 className="font-bold text-white">{nickname}</h3>
           <div className="text-xs text-gray-400">레벨 {level}</div>
         </div>
       </div>
