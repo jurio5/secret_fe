@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 interface ChatMessage {
-  id: number;
+  id: string | number;
   sender: string;
   message: string;
   timestamp: string;
