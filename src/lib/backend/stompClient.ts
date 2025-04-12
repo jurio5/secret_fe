@@ -36,6 +36,32 @@ function getCookie(name: string): string | null {
   return null;
 }
 
+const getAccessToken = (): string | null => {
+  if (!isBrowser) return null;
+  
+  const cookieToken = getCookie('access_token');
+  if (cookieToken) {
+    console.log('쿠키에서 토큰 찾음');
+    return cookieToken;
+  }
+  
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlToken = urlParams.get('access_token');
+  if (urlToken) {
+    console.log('URL에서 토큰 찾음');
+    localStorage.setItem('access_token', urlToken);
+    return urlToken;
+  }
+  
+  const localStorageToken = localStorage.getItem('access_token');
+  if (localStorageToken) {
+    console.log('로컬스토리지에서 토큰 찾음');
+    return localStorageToken;
+  }
+  
+  console.warn('토큰을 어디에서도 찾을 수 없음');
+  return null;
+};
 
 const getWebSocketUrl = () => {
   if (!isBrowser) return '';
@@ -43,7 +69,7 @@ const getWebSocketUrl = () => {
   const wsHost = process.env.NEXT_PUBLIC_WAS_WS_HOST;
   const baseUrl = wsHost || (process.env.NEXT_PUBLIC_WAS_HOST || 'http://localhost:8080') + '/ws';
   
-  const accessToken = getCookie('access_token');
+  const accessToken = getAccessToken();
   const url = accessToken 
     ? `${baseUrl}?access_token=${encodeURIComponent(accessToken)}` 
     : baseUrl;
@@ -51,6 +77,7 @@ const getWebSocketUrl = () => {
   console.debug('WebSocket URL 생성:', url);
   return url;
 };
+
 
 const createStompClient = () => {
   if (!isBrowser) return null;
@@ -101,6 +128,7 @@ const createStompClient = () => {
         connectionStatus = 'DISCONNECTED';
         client.deactivate();
         
+        // 오류 콜백이 있으면 호출
         if (connectionErrorCallback) {
           connectionErrorCallback(new Error("최대 재연결 시도 횟수를 초과했습니다."));
         }
@@ -111,6 +139,7 @@ const createStompClient = () => {
       console.error('❌ STOMP 오류:', frame.headers['message']);
       console.error('추가 정보:', frame.body);
       
+      // 오류 콜백이 있으면 호출
       if (connectionErrorCallback) {
         connectionErrorCallback(new Error(`STOMP 오류: ${frame.headers['message']}`));
       }
@@ -121,6 +150,7 @@ const createStompClient = () => {
     console.error('STOMP 클라이언트 생성 중 오류:', error);
     connectionStatus = 'DISCONNECTED';
     
+    // 오류 콜백이 있으면 호출
     if (connectionErrorCallback && error instanceof Error) {
       connectionErrorCallback(error);
     }
@@ -129,7 +159,9 @@ const createStompClient = () => {
   }
 };
 
-
+/**
+ * 웹소켓 연결을 초기화하고 시작하는 함수
+ */
 const connect = () => {
   if (!isBrowser || stompClientConnected) return;
   
@@ -137,6 +169,7 @@ const connect = () => {
   connectionStatus = 'CONNECTING';
   
   try {
+    // 기존 클라이언트가 있으면 정리
     if (stompClient) {
       try {
         stompClient.deactivate();
@@ -145,9 +178,11 @@ const connect = () => {
       }
     }
     
+    // 새 클라이언트 생성
     stompClient = createStompClient();
     
     if (stompClient) {
+      // 연결 활성화
       stompClient.activate();
       return true;
     } else {
@@ -158,6 +193,7 @@ const connect = () => {
     console.error('STOMP 연결 시작 중 오류:', error);
     connectionStatus = 'DISCONNECTED';
     
+    // 오류 콜백이 있으면 호출
     if (connectionErrorCallback && error instanceof Error) {
       connectionErrorCallback(error);
     }
@@ -208,9 +244,11 @@ const subscribe = (destination: string, callback: (message: any) => void) => {
   
   subscriptionCallbacks[destination] = callback;
   
+  // 연결되지 않았으면 자동으로 연결 시도
   if (!stompClientConnected) {
     console.log(`'${destination}'에 구독 예약 (연결 대기 중)`);
     
+    // 연결되지 않았으면 연결 시도
     if (connectionStatus === 'DISCONNECTED') {
       connect();
     }
@@ -257,6 +295,7 @@ const publish = (destination: string, body: any) => {
   if (!stompClientConnected) {
     publishQueue.push({ destination, body });
     
+    // 연결되지 않았으면 연결 시도
     if (connectionStatus === 'DISCONNECTED') {
       connect();
     }
@@ -277,6 +316,7 @@ const waitForConnection = (timeout = 30000): Promise<void> => {
       return resolve();
     }
     
+    // 아직 연결 시도를 하지 않았으면 연결 시도
     if (connectionStatus === 'DISCONNECTED') {
       connect();
     }
@@ -309,12 +349,15 @@ const disconnect = (): Promise<void> => {
     console.log('STOMP 연결 종료 중...');
     
     try {
+      // 모든 활성 구독 해제
       Object.keys(activeSubscriptions).forEach(unsubscribe);
       
+      // 클라이언트 비활성화
       stompClient.deactivate();
       stompClientConnected = false;
       connectionStatus = 'DISCONNECTED';
       
+      // 소켓 정리
       if (socket) {
         try {
           socket.close();
@@ -324,6 +367,7 @@ const disconnect = (): Promise<void> => {
         socket = null;
       }
       
+      // 클라이언트 정리
       stompClient = null;
       
       console.log('STOMP 연결 종료됨');
@@ -341,11 +385,14 @@ const getConnectionStatus = (): string => {
   return connectionStatus;
 };
 
-
+/**
+ * 연결 오류 발생 시 호출될 콜백 함수 설정
+ */
 const setConnectionErrorCallback = (callback: (error: Error) => void) => {
   connectionErrorCallback = callback;
 };
 
+// 초기 연결은 자동으로 하지 않고, 필요할 때 connect() 함수를 호출하도록 변경
 
 export default {
   connect,
