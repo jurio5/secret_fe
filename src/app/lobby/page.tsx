@@ -64,14 +64,33 @@ function LobbyContent() {
     console.log("채팅 메시지 상태 업데이트:", chatMessages);
   }, [chatMessages]);
 
-  // 쿠키 확인 로직 추가
+  // 쿠키 확인 및 저장 로직 추가
   useEffect(() => {
     // 페이지 로드시와 10초마다 쿠키 확인
     const checkCookies = () => {
       const cookies = document.cookie;
       console.log("현재 쿠키:", cookies);
+      
+      // 쿠키에서 토큰 추출
+      const getCookieValue = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(';').shift();
+        return undefined;
+      };
+      
       const token = getCookieValue('access_token');
       console.log("액세스 토큰 존재 여부:", token ? "있음" : "없음");
+      
+      // 쿠키에 토큰이 있으면 로컬 스토리지에도 저장
+      if (token) {
+        try {
+          localStorage.setItem('access_token', token);
+          console.log("로컬 스토리지에 토큰 저장 완료");
+        } catch (e) {
+          console.error("로컬 스토리지 저장 실패:", e);
+        }
+      }
     };
     
     checkCookies();
