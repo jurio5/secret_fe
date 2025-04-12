@@ -20,6 +20,81 @@ const publishQueue: {
   body: any;
 }[] = [];
 
+// Java 객체 문자열 파싱 함수
+const parseJavaObjectString = (text: string): any => {
+  try {
+    // WebSocketChatMessageResponse[type=CHAT, content="ㅎㅇㅎㅇ", senderId=박영준, senderName=박영준, timestamp=1744472559884, roomId=lobby]
+    // 위와 같은 형식의 문자열을 파싱
+
+    // 객체 이름과 내용 분리
+    const match = text.match(/(\w+)\[(.*)\]/);
+    if (!match) return null;
+    
+    const className = match[1]; // WebSocketChatMessageResponse
+    const fieldsString = match[2]; // type=CHAT, content="ㅎㅇㅎㅇ", senderId=박영준, ...
+    
+    // 필드 파싱
+    const result: Record<string, any> = { _className: className };
+    let currentIdx = 0;
+    let inQuote = false;
+    let currentField = '';
+    let currentKey = '';
+    
+    for (let i = 0; i < fieldsString.length; i++) {
+      const char = fieldsString[i];
+      
+      if (char === '"' && fieldsString[i-1] !== '\\') {
+        inQuote = !inQuote;
+        currentField += char;
+      } else if (char === '=' && !inQuote && !currentKey) {
+        currentKey = currentField.trim();
+        currentField = '';
+      } else if (char === ',' && !inQuote) {
+        // 필드 완료
+        if (currentKey) {
+          let value: any = currentField.trim();
+          
+          // 따옴표 제거
+          if (value.startsWith('"') && value.endsWith('"')) {
+            value = value.substring(1, value.length - 1);
+          } 
+          // timestamp 필드만 숫자로 변환
+          else if (currentKey === 'timestamp' && /^\d+$/.test(value)) {
+            value = parseInt(value, 10);
+          }
+          
+          result[currentKey] = value;
+          currentKey = '';
+          currentField = '';
+        }
+      } else {
+        currentField += char;
+      }
+    }
+    
+    // 마지막 필드 처리
+    if (currentKey) {
+      let value: any = currentField.trim();
+      
+      // 따옴표 제거
+      if (value.startsWith('"') && value.endsWith('"')) {
+        value = value.substring(1, value.length - 1);
+      } 
+      // timestamp 필드만 숫자로 변환
+      else if (currentKey === 'timestamp' && /^\d+$/.test(value)) {
+        value = parseInt(value, 10);
+      }
+      
+      result[currentKey] = value;
+    }
+    
+    return result;
+  } catch (error) {
+    console.error("Java 객체 문자열 파싱 실패:", error);
+    return null;
+  }
+};
+
 let stompClient = new Client({
   webSocketFactory: () => socket,
   connectHeaders: {},
@@ -55,7 +130,41 @@ const performSubscribe = (
   callback: (message: any) => void
 ) => {
   const subscription = stompClient.subscribe(destination, (message) => {
-    callback(JSON.parse(message.body));
+    try {
+      // JSON 파싱 시도
+      const parsedMessage = JSON.parse(message.body);
+      callback(parsedMessage);
+    } catch (error) {
+      // JSON 파싱 실패 시 Java 객체 문자열 파싱 시도
+      if (message.body.includes("WebSocketChatMessageResponse[")) {
+        const javaObject = parseJavaObjectString(message.body);
+        if (javaObject) {
+          console.debug("Java 객체 문자열 파싱 성공:", javaObject);
+          callback(javaObject);
+          return;
+        }
+      }
+      
+      // JSON 파싱 및 Java 객체 파싱 모두 실패 시 원본 메시지를 전달하고 로그 출력
+      console.warn(`메시지 파싱 실패 (${destination}):`, error);
+      console.debug("원본 메시지:", message.body);
+      
+      // 채팅 메시지 특수 처리 (/topic/lobby/chat 등)
+      if (destination.includes('/chat')) {
+        // 채팅 메시지용 기본 객체 생성
+        callback({
+          type: "CHAT",
+          content: message.body,
+          senderId: "system",
+          senderName: "System",
+          timestamp: Date.now(),
+          roomId: destination.split('/').pop() || "unknown"
+        });
+      } else {
+        // 기타 메시지는 원본 반환
+        callback(message.body);
+      }
+    }
   });
   activeSubscriptions[destination] = subscription;
 };
