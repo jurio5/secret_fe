@@ -38,7 +38,14 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
     }
     
     const data = await response.json();
-    return (data?.data || []) as FriendSearchResult[];
+    
+    return (data?.data || []).map((member: any) => ({
+      memberId: member.id,
+      nickname: member.nickname,
+      avatarUrl: member.avatarUrl,
+      level: member.level,
+      status: 'NONE'
+    })) as FriendSearchResult[];
   } catch (error) {
     console.error("사용자 검색에 실패했습니다:", error);
     return [];
