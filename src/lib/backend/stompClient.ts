@@ -20,7 +20,7 @@ const publishQueue: {
   body: any;
 }[] = [];
 
-const stompClient = new Client({
+let stompClient = new Client({
   webSocketFactory: () => socket,
   connectHeaders: {},
   debug: (str) => {
@@ -98,7 +98,69 @@ const publish = (destination: string, body: any) => {
   }
 };
 
+// 웹소켓 연결을 완전히 재설정하는 함수
+const reconnectWebSocket = () => {
+  try {
+    console.log("웹소켓 연결 재설정 시작");
+    
+    // 모든 구독 해제
+    Object.keys(activeSubscriptions).forEach(destination => {
+      if (activeSubscriptions[destination]) {
+        activeSubscriptions[destination].unsubscribe();
+        delete activeSubscriptions[destination];
+      }
+    });
+    
+    // 기존 클라이언트 비활성화
+    if (stompClientConnected) {
+      stompClient.deactivate();
+      stompClientConnected = false;
+    }
+    
+    // 새로운 소켓 연결 생성
+    const newSocket = new SockJS(process.env.NEXT_PUBLIC_WAS_WS_HOST!!);
+    
+    // 새 STOMP 클라이언트 생성
+    stompClient = new Client({
+      webSocketFactory: () => newSocket,
+      connectHeaders: {},
+      debug: (str) => {
+        console.log("[STOMP]", str);
+      },
+      reconnectDelay: 5000,
+      onConnect: () => {
+        console.log("✅ 웹소켓 재연결 성공");
+        stompClientConnected = true;
+        
+        // 연결 성공 시 대기 중인 구독 처리
+        while (subscriptionQueue.length > 0) {
+          const { destination, callback } = subscriptionQueue.shift()!;
+          performSubscribe(destination, callback);
+        }
+    
+        // 연결 성공 시 대기 중인 발행 처리
+        while (publishQueue.length > 0) {
+          const { destination, body } = publishQueue.shift()!;
+          performPublish(destination, body);
+        }
+      },
+      onStompError: (frame) => {
+        console.error("❌ STOMP 오류:", frame.headers["message"]);
+        console.error("상세 내용:", frame.body);
+      },
+    });
+    
+    // 새 클라이언트 활성화
+    stompClient.activate();
+    
+    return true;
+  } catch (error) {
+    console.error("웹소켓 재연결 중 오류 발생:", error);
+    return false;
+  }
+};
+
 stompClient.activate();
 
 export default stompClient;
-export { subscribe, unsubscribe, publish };
+export { subscribe, unsubscribe, publish, reconnectWebSocket };
