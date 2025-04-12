@@ -82,6 +82,7 @@ function LobbyContent() {
   const [showChat, setShowChat] = useState<boolean>(true);
   const [showFriendList, setShowFriendList] = useState<boolean>(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [isComposing, setIsComposing] = useState(false);
   
   const router = useRouter();
   
@@ -831,10 +832,20 @@ function LobbyContent() {
   
   // 채팅 입력창 키 이벤트 핸들러
   const handleChatKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !isComposing) {
       e.preventDefault();
       handleSendChatMessage();
     }
+  };
+  
+  // 조합 입력 시작 핸들러 (한글, 일본어 등 IME 입력)
+  const handleCompositionStart = () => {
+    setIsComposing(true);
+  };
+  
+  // 조합 입력 종료 핸들러
+  const handleCompositionEnd = () => {
+    setIsComposing(false);
   };
 
   // 채팅 구독 설정
@@ -1306,6 +1317,8 @@ function LobbyContent() {
                   value={newChatMessage}
                   onChange={(e) => setNewChatMessage(e.target.value)}
                   onKeyDown={handleChatKeyDown}
+                  onCompositionStart={handleCompositionStart}
+                  onCompositionEnd={handleCompositionEnd}
                   placeholder={currentUser ? "메시지를 입력하세요..." : "로그인 후 채팅 가능합니다"}
                   className="flex-grow bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 text-sm placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   disabled={!currentUser}
