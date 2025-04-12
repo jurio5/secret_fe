@@ -58,6 +58,11 @@ function LobbyContent() {
   // WebSocket 연결 상태
   const [socketConnected, setSocketConnected] = useState<boolean | null>(null);
   
+  // 디버깅: WebSocket 연결 상태 변화를 로그로 출력
+  useEffect(() => {
+    console.log('WebSocket 연결 상태 변경됨:', socketConnected);
+  }, [socketConnected]);
+  
   // 사용자 목록 (예시 데이터)
   const [users, setUsers] = useState<User[]>([
     { id: 1, nickname: "사용자1", color: "purple-300" },
@@ -131,6 +136,22 @@ function LobbyContent() {
       const status = isConnected();
       setSocketConnected(status);
       console.log("STOMP 연결 상태:", status ? "연결됨" : "연결 끊김", getConnectionStatus());
+      
+      // 연결되면 접속자 목록 요청
+      if (status) {
+        setTimeout(() => {
+          try {
+            console.log("초기 접속자 목록 요청 시도");
+            publish("/app/lobby/users", {
+              type: "REQUEST",
+              content: "get_users",
+              timestamp: Date.now()
+            });
+          } catch (error) {
+            console.error("초기 접속자 목록 요청 실패:", error);
+          }
+        }, 1000);
+      }
     };
     
     // 초기 연결 상태 확인
