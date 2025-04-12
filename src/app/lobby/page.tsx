@@ -207,7 +207,7 @@ function LobbyContent() {
         let messageContent = "";
         let sender = "";
         let messageType = "CHAT";
-        let clientId: number | null = null;
+        let clientId: string | number | null = null;
         
         // content가 JSON 문자열인 경우 (중첩된 형식)
         if (typeof message.content === 'string' && message.content.startsWith('{')) {
@@ -216,29 +216,31 @@ function LobbyContent() {
             console.log("내부 메시지 파싱:", innerMessage);
             
             messageContent = innerMessage.content || "";
+            messageType = innerMessage.type || "CHAT";
+            clientId = innerMessage.clientMessageId || null;
             
-            // 수신된 메시지의 발신자가 "나"인 경우 senderName을 사용 (다른 사용자 표시)
+            // 발신자 처리: 내가 보낸 메시지이면 "나"로 표시
             if (innerMessage.sender === "나" && message.senderName) {
-              sender = message.senderName;
+              const isMyMessage = clientId && typeof clientId === 'string' && clientId.startsWith("local_");
+              sender = isMyMessage ? "나" : message.senderName;
             } else {
-              sender = innerMessage.sender || message.senderName || "알 수 없음";
+              sender = message.senderName || "알 수 없음";
             }
             
-            messageType = innerMessage.type || "CHAT";
-            clientId = innerMessage.clientMessageId;
-            
-            // 자신이 보낸 메시지 여부 확인 (로그용)
-            const isMyMessage = clientId && chatMessages.some(msg => msg.id === clientId);
             console.log("메시지 정보:", {
               내용: messageContent,
               발신자: sender,
               타입: messageType,
-              클라이언트ID: clientId,
-              자신의메시지: isMyMessage
+              클라이언트ID: clientId
             });
             
             // 이미 표시된 메시지는 건너뛰기 (clientId로 식별)
-            if (clientId && chatMessages.some(msg => msg.id === clientId)) {
+            if (clientId && chatMessages.some(msg => {
+              // 문자열 ID와 숫자 ID 모두 처리
+              const msgId = String(msg.id);
+              const compareId = String(clientId);
+              return msgId === compareId;
+            })) {
               console.log("이미 표시된 메시지 무시:", clientId);
               return;
             }
@@ -255,10 +257,10 @@ function LobbyContent() {
         }
         
         // 고유 ID 생성 - clientId가 없는 경우에도 메시지별 고유 ID 사용
-        const messageId = clientId || Date.now();
+        const messageId = clientId || "server_" + Date.now();
         
         // 다시 한번 중복 메시지 검사
-        if (chatMessages.some(msg => msg.id === messageId)) {
+        if (chatMessages.some(msg => String(msg.id) === String(messageId))) {
           console.log("중복 메시지 무시 (최종 검사):", messageId);
           return;
         }
@@ -287,7 +289,7 @@ function LobbyContent() {
           // 단순 문자열인 경우
           console.log("단순 문자열 메시지:", message);
           
-          const messageId = Date.now();
+          const messageId = "system_" + Date.now();
           // 중복 검사
           if (chatMessages.some(msg => msg.message === message && msg.type === "SYSTEM")) {
             console.log("중복 시스템 메시지 무시");
@@ -308,16 +310,16 @@ function LobbyContent() {
       // 위 조건에 해당하지 않는 객체인 경우
       console.log("기타 메시지 형식:", message);
       
-      const messageId = message.id || Date.now();
+      const messageId = message.id || "other_" + Date.now();
       // 중복 검사
-      if (chatMessages.some(msg => msg.id === messageId)) {
+      if (chatMessages.some(msg => String(msg.id) === String(messageId))) {
         console.log("중복 기타 메시지 무시:", messageId);
         return;
       }
       
       addChatMessage({
         id: messageId,
-        sender: message.sender || message.senderName || "알 수 없음",
+        sender: message.senderName || message.senderId || "알 수 없음",
         message: message.content || message.message || message.text || JSON.stringify(message),
         timestamp: message.timestamp ? 
           new Date(parseInt(message.timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 
