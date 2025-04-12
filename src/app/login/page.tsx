@@ -52,7 +52,7 @@ function LoginContent() {
             </a>
             
             <a 
-              href={`${process.env.NEXT_PUBLIC_WAS_HOST}/oauth2/authorization/google`}
+              href={`${process.env.NEXT_PUBLIC_WAS_HOST}/oauth2/authorization/google?redirect_uri=${encodeURIComponent(`${process.env.NEXT_PUBLIC_WAS_HOST}/login/oauth2/code/google`)}`}
               className="flex items-center justify-center w-full px-4 py-3.5 space-x-4 bg-white border border-gray-200 text-gray-700 rounded-xl hover:shadow-md transition-all"
             >
               <div className="w-6 h-6 relative">
