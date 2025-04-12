@@ -4,7 +4,7 @@ import { useEffect, Suspense, useState, useRef } from "react";
 import AppLayout from "@/components/common/AppLayout";
 import client from "@/lib/backend/client";
 import { components } from "@/lib/backend/apiV1/schema";
-import { subscribe, unsubscribe, publish } from "@/lib/backend/stompClient";
+import { subscribe, unsubscribe, publish, isConnected, getConnectionStatus } from "@/lib/backend/stompClient";
 
 interface ApiResponse<T> {
   data: {
@@ -14,6 +14,8 @@ interface ApiResponse<T> {
     msg: string;
   };
 }
+
+type WebSocketEventHandler = (e: Event) => void;
 
 function LobbyContent() {
   const [rooms, setRooms] = useState<components["schemas"]["RoomResponse"][]>(
@@ -29,6 +31,7 @@ function LobbyContent() {
   const [messageInput, setMessageInput] = useState("");
   const [chatVisible, setChatVisible] = useState(true);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [socketConnected, setSocketConnected] = useState<boolean | null>(null); // null=초기상태, true=연결됨, false=연결실패
 
   async function loadRooms() {
     try {
@@ -49,6 +52,16 @@ function LobbyContent() {
   useEffect(() => {
     loadRooms();
 
+    const checkConnectionStatus = () => {
+      const status = isConnected();
+      setSocketConnected(status);
+      console.log("STOMP 연결 상태:", status ? "연결됨" : "연결 끊김", getConnectionStatus());
+    };
+    
+    checkConnectionStatus();
+    
+    const interval = setInterval(checkConnectionStatus, 3000);
+
     subscribe("/topic/lobby", (_) => {
       loadRooms();
     });
@@ -60,6 +73,7 @@ function LobbyContent() {
     return () => {
       unsubscribe("/topic/lobby");
       unsubscribe("/topic/lobby/chat");
+      clearInterval(interval);
     };
   }, []);
 
@@ -183,18 +197,12 @@ function LobbyContent() {
         <div className="p-4 border-b border-indigo-900/20">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-12 h-12 rounded-full bg-indigo-600/30 flex items-center justify-center text-xl font-medium overflow-hidden">
-              <img 
-                src="/images/avatars/default.png" 
-                alt="사용자 아바타"
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.onerror = null;
-                  e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E";
-                }}
-              />
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-white">
+                <path fillRule="evenodd" d="M18.685 19.097A9.723 9.723 0 0021.75 12c0-5.385-4.365-9.75-9.75-9.75S2.25 6.615 2.25 12a9.723 9.723 0 003.065 7.097A9.716 9.716 0 0012 21.75a9.716 9.716 0 006.685-2.653zm-12.54-1.285A7.486 7.486 0 0112 15a7.486 7.486 0 015.855 2.812A8.224 8.224 0 0112 20.25a8.224 8.224 0 01-5.855-2.438zM15.75 9a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" clipRule="evenodd" />
+              </svg>
             </div>
             <div>
-              <h3 className="font-bold text-white">사용자</h3>
+              <h3 className="font-bold text-white">테스터박</h3>
               <div className="text-xs text-gray-400">레벨 1</div>
             </div>
           </div>
@@ -220,43 +228,25 @@ function LobbyContent() {
           <div className="space-y-2">
             <div className="p-2 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/15 transition-colors text-sm flex items-center gap-2 cursor-pointer">
               <div className="w-8 h-8 rounded-full bg-indigo-600/30 flex items-center justify-center text-xs overflow-hidden">
-                <img 
-                  src="/images/avatars/user1.png" 
-                  alt="사용자1 아바타"
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    e.currentTarget.onerror = null;
-                    e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E";
-                  }}
-                />
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-purple-300">
+                  <path fillRule="evenodd" d="M18.685 19.097A9.723 9.723 0 0021.75 12c0-5.385-4.365-9.75-9.75-9.75S2.25 6.615 2.25 12a9.723 9.723 0 003.065 7.097A9.716 9.716 0 0012 21.75a9.716 9.716 0 006.685-2.653zm-12.54-1.285A7.486 7.486 0 0112 15a7.486 7.486 0 015.855 2.812A8.224 8.224 0 0112 20.25a8.224 8.224 0 01-5.855-2.438zM15.75 9a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" clipRule="evenodd" />
+                </svg>
               </div>
               <span>사용자1</span>
             </div>
             <div className="p-2 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/15 transition-colors text-sm flex items-center gap-2 cursor-pointer">
               <div className="w-8 h-8 rounded-full bg-indigo-600/30 flex items-center justify-center text-xs overflow-hidden">
-                <img 
-                  src="/images/avatars/user2.png" 
-                  alt="사용자2 아바타"
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    e.currentTarget.onerror = null;
-                    e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E";
-                  }}
-                />
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-green-300">
+                  <path fillRule="evenodd" d="M18.685 19.097A9.723 9.723 0 0021.75 12c0-5.385-4.365-9.75-9.75-9.75S2.25 6.615 2.25 12a9.723 9.723 0 003.065 7.097A9.716 9.716 0 0012 21.75a9.716 9.716 0 006.685-2.653zm-12.54-1.285A7.486 7.486 0 0112 15a7.486 7.486 0 015.855 2.812A8.224 8.224 0 0112 20.25a8.224 8.224 0 01-5.855-2.438zM15.75 9a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" clipRule="evenodd" />
+                </svg>
               </div>
               <span>사용자2</span>
             </div>
             <div className="p-2 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/15 transition-colors text-sm flex items-center gap-2 cursor-pointer">
               <div className="w-8 h-8 rounded-full bg-indigo-600/30 flex items-center justify-center text-xs overflow-hidden">
-                <img 
-                  src="/images/avatars/user3.png" 
-                  alt="사용자3 아바타"
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    e.currentTarget.onerror = null;
-                    e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E";
-                  }}
-                />
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-blue-300">
+                  <path fillRule="evenodd" d="M18.685 19.097A9.723 9.723 0 0021.75 12c0-5.385-4.365-9.75-9.75-9.75S2.25 6.615 2.25 12a9.723 9.723 0 003.065 7.097A9.716 9.716 0 0012 21.75a9.716 9.716 0 006.685-2.653zm-12.54-1.285A7.486 7.486 0 0112 15a7.486 7.486 0 015.855 2.812A8.224 8.224 0 0112 20.25a8.224 8.224 0 01-5.855-2.438zM15.75 9a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" clipRule="evenodd" />
+                </svg>
               </div>
               <span>사용자3</span>
             </div>
@@ -412,6 +402,16 @@ function LobbyContent() {
                     </svg>
                     <span className="text-indigo-300 text-xs font-medium">채팅</span>
                   </div>
+                  
+                  {socketConnected !== null && (
+                    <div className="flex items-center ml-2">
+                      <span 
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          socketConnected ? 'bg-green-500' : 'bg-red-500'
+                        }`}
+                      ></span>
+                    </div>
+                  )}
                 </div>
                 
                 <div className="flex items-center gap-2">
@@ -428,6 +428,14 @@ function LobbyContent() {
                 </div>
               </div>
               
+              {socketConnected === false && chatVisible && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-md p-2 mx-2 mt-2">
+                  <p className="text-xs text-red-300">
+                    서버 연결에 실패했습니다. 일부 기능이 제한될 수 있습니다.
+                  </p>
+                </div>
+              )}
+
               {chatVisible && (
                 <div className="flex flex-col h-[calc(100%-32px)]">
                   <div 
