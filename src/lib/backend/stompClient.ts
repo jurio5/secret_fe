@@ -226,18 +226,29 @@ const performSubscribe = (
   destination: string,
   callback: (message: any) => void
 ) => {
-  if (!isBrowser || !stompClientConnected || !stompClient) return null;
+  if (!isBrowser || !stompClientConnected || !stompClient) {
+    console.log(`구독 실패 (${destination}) - 클라이언트 준비 안됨:`, {
+      isBrowser,
+      stompClientConnected,
+      hasClient: !!stompClient
+    });
+    return null;
+  }
   
   try {
+    console.log(`구독 실행: ${destination}`);
     const subscription = stompClient.subscribe(destination, (message: IMessage) => {
+      console.log(`메시지 수신 (${destination}):`, message.body?.substring(0, 100) + (message.body?.length > 100 ? '...' : ''));
       try {
         const parsedBody = JSON.parse(message.body);
         callback(parsedBody);
       } catch (e) {
+        console.warn(`메시지 파싱 실패 (${destination}):`, e);
         callback(message.body);
       }
     });
     
+    console.log(`구독 성공: ${destination}`, subscription.id);
     activeSubscriptions[destination] = subscription;
     return subscription;
   } catch (error) {
@@ -247,8 +258,12 @@ const performSubscribe = (
 };
 
 const subscribe = (destination: string, callback: (message: any) => void) => {
-  if (!isBrowser) return;
+  if (!isBrowser) {
+    console.log(`구독 무시 (${destination}) - 브라우저 환경 아님`);
+    return;
+  }
   
+  console.log(`구독 요청: ${destination} (현재 상태: ${connectionStatus})`);
   subscriptionCallbacks[destination] = callback;
   
   // 연결되지 않았으면 자동으로 연결 시도
@@ -257,6 +272,7 @@ const subscribe = (destination: string, callback: (message: any) => void) => {
     
     // 연결되지 않았으면 연결 시도
     if (connectionStatus === 'DISCONNECTED') {
+      console.log(`구독 위해 연결 시도: ${destination}`);
       connect();
     }
     
@@ -284,26 +300,38 @@ const performPublish = (
   destination: string,
   body: any
 ) => {
-  if (!isBrowser || !stompClient) return;
+  if (!isBrowser || !stompClient) {
+    console.log(`메시지 발행 불가 (${destination}) - 클라이언트 준비 안됨`);
+    return;
+  }
   
   try {
+    console.log(`메시지 발행: ${destination}`, body);
     stompClient.publish({
       destination,
       body: JSON.stringify(body),
     });
+    console.log(`메시지 발행 완료: ${destination}`);
   } catch (error) {
     console.error(`'${destination}'에 메시지 전송 중 오류:`, error);
   }
 };
 
 const publish = (destination: string, body: any) => {
-  if (!isBrowser) return;
+  if (!isBrowser) {
+    console.log(`발행 무시 (${destination}) - 브라우저 환경 아님`);
+    return;
+  }
+  
+  console.log(`발행 요청: ${destination} (현재 상태: ${connectionStatus})`, body);
   
   if (!stompClientConnected) {
+    console.log(`발행 예약 (연결 대기 중): ${destination}`);
     publishQueue.push({ destination, body });
     
     // 연결되지 않았으면 연결 시도
     if (connectionStatus === 'DISCONNECTED') {
+      console.log(`발행 위해 연결 시도: ${destination}`);
       connect();
     }
   } else {
