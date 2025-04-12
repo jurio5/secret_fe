@@ -30,6 +30,15 @@ interface ApiResponse<T> {
   };
 }
 
+// 서버를 위한 ChatMessage 인터페이스 정의
+export interface ChatMessage {
+  id: string | number;
+  sender: string;
+  message: string;
+  timestamp: string;
+  type: string;
+}
+
 // 사용자 타입 정의
 interface User {
   id: string | number;
@@ -40,14 +49,8 @@ interface User {
 function LobbyContent() {
   const [rooms, setRooms] = useState<components["schemas"]["RoomResponse"][]>([]);
   
-  // 채팅 관련 상태
-  const [chatMessages, setChatMessages] = useState<Array<{
-    id: number;
-    sender: string;
-    message: string;
-    timestamp: string;
-    type: string;
-  }>>([]);
+  // 채팅 관련 상태 - ChatMessage 인터페이스 사용
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   
   // WebSocket 연결 상태
   const [socketConnected, setSocketConnected] = useState<boolean | null>(null);
@@ -251,9 +254,18 @@ function LobbyContent() {
           sender = message.senderName || message.senderId || "알 수 없음";
         }
         
+        // 고유 ID 생성 - clientId가 없는 경우에도 메시지별 고유 ID 사용
+        const messageId = clientId || Date.now();
+        
+        // 다시 한번 중복 메시지 검사
+        if (chatMessages.some(msg => msg.id === messageId)) {
+          console.log("중복 메시지 무시 (최종 검사):", messageId);
+          return;
+        }
+        
         // 메시지 추가
         addChatMessage({
-          id: clientId || Date.now(),
+          id: messageId,
           sender: sender,
           message: messageContent,
           timestamp: message.timestamp ? 
@@ -274,8 +286,16 @@ function LobbyContent() {
         } catch (e) {
           // 단순 문자열인 경우
           console.log("단순 문자열 메시지:", message);
+          
+          const messageId = Date.now();
+          // 중복 검사
+          if (chatMessages.some(msg => msg.message === message && msg.type === "SYSTEM")) {
+            console.log("중복 시스템 메시지 무시");
+            return;
+          }
+          
           addChatMessage({
-            id: Date.now(),
+            id: messageId,
             sender: "시스템",
             message: message,
             timestamp: timeString,
@@ -287,8 +307,16 @@ function LobbyContent() {
       
       // 위 조건에 해당하지 않는 객체인 경우
       console.log("기타 메시지 형식:", message);
+      
+      const messageId = message.id || Date.now();
+      // 중복 검사
+      if (chatMessages.some(msg => msg.id === messageId)) {
+        console.log("중복 기타 메시지 무시:", messageId);
+        return;
+      }
+      
       addChatMessage({
-        id: Date.now(),
+        id: messageId,
         sender: message.sender || message.senderName || "알 수 없음",
         message: message.content || message.message || message.text || JSON.stringify(message),
         timestamp: message.timestamp ? 
@@ -302,14 +330,14 @@ function LobbyContent() {
     }
   };
 
-  // 채팅 메시지 추가 함수
-  const addChatMessage = (message: {
-    id: number;
-    sender: string;
-    message: string;
-    timestamp: string;
-    type: string;
-  }) => {
+  // 채팅 메시지 추가 함수 - 매개변수 타입을 ChatMessage로 수정
+  const addChatMessage = (message: ChatMessage) => {
+    // 중복 메시지 검사 추가
+    if (chatMessages.some(msg => msg.id === message.id)) {
+      console.log("중복 메시지 무시 (addChatMessage):", message.id);
+      return;
+    }
+    
     setChatMessages((prev) => [...prev, message]);
   };
 
@@ -319,7 +347,8 @@ function LobbyContent() {
 
     const now = new Date();
     const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const messageId = Date.now(); // 메시지 고유 ID 생성
+    // 프론트엔드에서 생성한 메시지ID에는 'local_' 접두사를 붙여서 서버 메시지와 구분
+    const messageId = 'local_' + Date.now();
 
     // 클라이언트 측에서 메시지 미리보기 추가
     const newMessage = {
@@ -338,7 +367,7 @@ function LobbyContent() {
       content: messageInput,
       sender: "나", // 실제로는 사용자 정보를 포함해야 함
       timestamp: now.toISOString(),
-      clientMessageId: messageId // 클라이언트 메시지 ID 추가
+      clientMessageId: messageId // 로컬 메시지 ID를 서버에 전달
     });
   };
 
