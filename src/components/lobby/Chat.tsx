@@ -26,6 +26,7 @@ const Chat: React.FC<ChatProps> = ({
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    console.log("Chat 컴포넌트가 받은 메시지 목록:", messages);
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
@@ -145,4 +146,4 @@ const Chat: React.FC<ChatProps> = ({
   );
 };
 
-export default Chat; 
+export default Chat;
