@@ -3,14 +3,14 @@
 import React from 'react';
 
 interface StatCardsProps {
-  username: string;
+  nickname: string;
   level: number;
   rank: number;
   points: number;
 }
 
 const StatCards: React.FC<StatCardsProps> = ({
-  username = "사용자",
+  nickname = "사용자",
   level = 1,
   rank = 99,
   points = 0
@@ -21,7 +21,7 @@ const StatCards: React.FC<StatCardsProps> = ({
         <div className="flex justify-between items-start">
           <div>
             <h3 className="text-gray-400 text-xs mb-1">내 프로필</h3>
-            <p className="text-xl font-bold text-white">{username}</p>
+            <p className="text-xl font-bold text-white">{nickname}</p>
           </div>
           <span className="bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-md text-xs">
             Lv.{level}
