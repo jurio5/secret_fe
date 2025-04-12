@@ -138,7 +138,7 @@ const FriendModal: React.FC<FriendModalProps> = ({ isOpen, onClose }) => {
                 : 'text-gray-400 hover:text-white'
             }`}
           >
-            친구 검색
+            사용자 검색
           </button>
         </div>
 

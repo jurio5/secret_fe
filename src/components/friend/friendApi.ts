@@ -26,29 +26,42 @@ export const getFriendRequests = async (): Promise<FriendRequest[]> => {
 // 닉네임으로 사용자 검색
 export const searchUserByNickname = async (nickname: string): Promise<FriendSearchResult[]> => {
   try {
-    const response = await fetch(`/api/v1/members/search?nickname=${encodeURIComponent(nickname)}`, {
+    console.log(`검색 시도: nickname=${nickname}`);
+    
+    // 백엔드 서버 주소 직접 지정
+    const response = await fetch(`http://localhost:8080/api/v1/members/search?nickname=${encodeURIComponent(nickname)}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include', // 인증 쿠키 포함
     });
     
+    // 400 에러는 검색 결과가 없는 경우일 수 있음
+    if (response.status === 400) {
+      console.log('검색 결과가 없습니다 (400 응답)');
+      return [];
+    }
+    
     if (!response.ok) {
-      throw new Error(`검색 실패: ${response.status}`);
+      console.error(`검색 실패: ${response.status}`, response);
+      return []; // 오류 발생 시 빈 배열 반환 (에러 화면 방지)
     }
     
     const data = await response.json();
+    console.log('검색 결과 데이터:', data);
     
+    // 백엔드에서 반환된 데이터를 FriendSearchResult 형식으로 변환
     return (data?.data || []).map((member: any) => ({
       memberId: member.id,
       nickname: member.nickname,
       avatarUrl: member.avatarUrl,
       level: member.level,
-      status: 'NONE'
+      status: 'NONE' // 기본 상태
     })) as FriendSearchResult[];
   } catch (error) {
     console.error("사용자 검색에 실패했습니다:", error);
-    return [];
+    return []; // 오류 발생 시 빈 배열 반환 (에러 화면 방지)
   }
 };
 
