@@ -401,7 +401,19 @@ function LobbyContent() {
               subscribe("/topic/lobby/users", async (data: User[]) => {
                 // 아바타 정보 추가
                 const usersWithAvatars = await fetchUserAvatars(data);
-                setActiveUsers(usersWithAvatars);
+                
+                // 현재 사용자를 목록 최상단으로 정렬
+                if (currentUser) {
+                  const sortedUsers = [...usersWithAvatars].sort((a, b) => {
+                    if (a.id === currentUser.id) return -1;
+                    if (b.id === currentUser.id) return 1;
+                    return 0;
+                  });
+                  setActiveUsers(sortedUsers);
+                } else {
+                  setActiveUsers(usersWithAvatars);
+                }
+                
                 setIsConnected(true);
                 
                 // 현재 로그인한 사용자의 정보도 업데이트
@@ -490,7 +502,19 @@ function LobbyContent() {
     subscribe("/topic/lobby/users", async (data: User[]) => {
       // 아바타 정보 추가
       const usersWithAvatars = await fetchUserAvatars(data);
-      setActiveUsers(usersWithAvatars);
+      
+      // 현재 사용자를 목록 최상단으로 정렬
+      if (currentUser) {
+        const sortedUsers = [...usersWithAvatars].sort((a, b) => {
+          if (a.id === currentUser.id) return -1;
+          if (b.id === currentUser.id) return 1;
+          return 0;
+        });
+        setActiveUsers(sortedUsers);
+      } else {
+        setActiveUsers(usersWithAvatars);
+      }
+      
       setIsConnected(true);
       
       // 현재 로그인한 사용자의 정보도 업데이트
