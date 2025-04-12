@@ -1017,7 +1017,7 @@ function LobbyContent() {
 
 export default function LobbyPage() {
   return (
-    <AppLayout showBeforeUnloadWarning={true} showHomeButton={false}>
+    <AppLayout showBeforeUnloadWarning={true} showHomeButton={false} showHeader={false}>
       <Suspense
         fallback={
           <div className="flex justify-center items-center min-h-[60vh]">
