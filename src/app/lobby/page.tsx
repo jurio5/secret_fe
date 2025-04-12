@@ -4,7 +4,7 @@ import { useEffect, Suspense, useState } from "react";
 import AppLayout from "@/components/common/AppLayout";
 import client from "@/lib/backend/client";
 import { components } from "@/lib/backend/apiV1/schema";
-import { subscribe, unsubscribe, publish } from "@/lib/backend/stompClient";
+import { subscribe, unsubscribe, publish, reconnectWebSocket } from "@/lib/backend/stompClient";
 import Toast, { ToastProps } from "@/components/common/Toast";
 
 interface User {
@@ -356,6 +356,43 @@ function LobbyContent() {
               : user
           )
         );
+        
+        // 웹소켓 연결을 완전히 재설정
+        console.log("닉네임 변경 후 웹소켓 연결 재설정");
+        
+        // 웹소켓 연결 완전 재설정
+        const success = reconnectWebSocket();
+        
+        if (success) {
+          // 재연결 성공 시 약간의 지연 후 구독 재설정
+          setTimeout(() => {
+            // 룸 업데이트 구독
+            subscribe("/topic/lobby", (_) => {
+              loadRooms();
+            });
+            
+            // 로비 접속자 목록 구독
+            subscribe("/topic/lobby/users", async (data: User[]) => {
+              // 아바타 정보 추가
+              const usersWithAvatars = await fetchUserAvatars(data);
+              setActiveUsers(usersWithAvatars);
+              setIsConnected(true);
+              
+              // 현재 로그인한 사용자의 정보도 업데이트
+              if (currentUser) {
+                const updatedCurrentUser = usersWithAvatars.find(user => user.id === currentUser.id);
+                if (updatedCurrentUser) {
+                  setCurrentUser(updatedCurrentUser);
+                }
+              }
+            });
+            
+            // 접속자 목록 요청
+            publish("/app/lobby/users", JSON.stringify({ action: "getUsers" }));
+          }, 1000); // 1초 후 재구독
+        } else {
+          console.error("웹소켓 재연결 실패");
+        }
       }
       
       // 성공 메시지 토스트 표시
@@ -438,9 +475,20 @@ function LobbyContent() {
     // 접속자 목록 요청
     publish("/app/lobby/users", JSON.stringify({ action: "getUsers" }));
 
+    // 컴포넌트 언마운트 시 모든 구독 해제 및 웹소켓 정리
     return () => {
+      console.log("로비 페이지 언마운트: 웹소켓 구독 해제");
       unsubscribe("/topic/lobby");
       unsubscribe("/topic/lobby/users");
+      
+      // 페이지 벗어날 때 세션 변경 여부 체크
+      if (currentUser && currentUser.nickname && 
+          currentUser.nickname !== localStorage.getItem('user_nickname')) {
+        // 닉네임이 변경된 경우 로컬 스토리지에 저장
+        localStorage.setItem('user_nickname', currentUser.nickname);
+        // 다음 페이지 로드 시 참조할 수 있도록 세션 변경 정보 저장
+        localStorage.setItem('session_changed', 'true');
+      }
     };
   }, []);
 
