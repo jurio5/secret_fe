@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import client from "@/lib/backend/client";
+import { fetchWithRetry, fetchWithAuthErrorHandling } from '@/lib/utils/apiUtils';
 
 // 상수 정의
 const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';
@@ -66,7 +67,20 @@ export default function RankingModal({ isOpen, onClose, currentUserId, onToast }
     setIsLoadingRankings(true);
     
     try {
-      const response = await client.GET("/api/v1/members/rankings") as ApiResponse<MemberRanking[]>;
+      // fetchWithAuthErrorHandling 사용하여 인증 오류 처리
+      const response = await fetchWithAuthErrorHandling(
+        () => client.GET("/api/v1/members/rankings") as Promise<ApiResponse<MemberRanking[]>>,
+        () => {
+          // 인증 오류 발생 시 토스트 메시지 표시
+          if (onToast) {
+            onToast({
+              type: "error",
+              message: "인증이 필요합니다. 다시 로그인해주세요.",
+              duration: 3000
+            });
+          }
+        }
+      );
       
       if (response.error) {
         console.error("랭킹 정보를 가져오는데 실패했습니다:", response.error);
@@ -83,44 +97,70 @@ export default function RankingModal({ isOpen, onClose, currentUserId, onToast }
       }
       
       if (response.data?.data) {
-        // 랭킹 데이터에 아바타 URL 추가
-        const rankingsWithAvatars = await Promise.all(
-          response.data.data.map(async (ranking, index) => {
-            let avatarUrl = userProfileCache[ranking.id]?.avatarUrl;
-            
-            // 캐시에 없는 경우 기본 아바타 사용
-            if (!avatarUrl) {
-              avatarUrl = DEFAULT_AVATAR;
-              
-              // 백그라운드에서 아바타 정보 가져오기
-              try {
-                const profileResponse = await client.GET(`/api/v1/members/{memberId}`, {
-                  params: { path: { memberId: ranking.id } }
-                }) as ApiResponse<UserProfile>;
-                
-                if (profileResponse.data?.data && profileResponse.data.data.avatarUrl) {
-                  avatarUrl = profileResponse.data.data.avatarUrl;
-                  
-                  // 캐시 업데이트
-                  userProfileCache[ranking.id] = {
-                    ...profileResponse.data.data,
-                    lastUpdated: Date.now()
-                  };
-                }
-              } catch (error) {
-                console.error(`사용자 ${ranking.id}의 아바타 정보를 가져오는데 실패했습니다:`, error);
+        // 우선 기본 데이터로 UI 업데이트 (기본 아바타 사용)
+        const rankingsWithRank = response.data.data.map((ranking, index) => ({
+          ...ranking,
+          rank: index + 1,
+          avatarUrl: DEFAULT_AVATAR // 기본 아바타로 초기화
+        }));
+        
+        // 우선 기본 아바타로 UI 업데이트
+        setRankings(rankingsWithRank);
+        
+        // 백그라운드에서 순차적으로 아바타 정보 가져오기
+        const updateAvatars = async () => {
+          for (const ranking of rankingsWithRank) {
+            try {
+              // 캐시에 이미 사용자 정보가 있는지 확인
+              if (userProfileCache[ranking.id]?.avatarUrl) {
+                // 캐시된 정보로 UI 업데이트
+                setRankings(prevRankings => 
+                  prevRankings.map(r => 
+                    r.id === ranking.id 
+                      ? { ...r, avatarUrl: userProfileCache[ranking.id].avatarUrl } 
+                      : r
+                  )
+                );
+                continue;
               }
+              
+              // 재시도 로직 포함하여 사용자 정보 가져오기
+              const profileResponse = await fetchWithRetry(
+                () => client.GET(`/api/v1/members/{memberId}`, {
+                  params: { path: { memberId: ranking.id } }
+                }) as Promise<ApiResponse<UserProfile>>,
+                1, // 최대 1번 재시도
+                300 // 300ms 대기 후 재시도
+              );
+              
+              if (profileResponse.data?.data) {
+                // 캐시 업데이트
+                userProfileCache[ranking.id] = {
+                  ...profileResponse.data.data,
+                  lastUpdated: Date.now()
+                };
+                
+                // UI 업데이트 (하나씩 순차적으로)
+                setRankings(prevRankings => 
+                  prevRankings.map(r => 
+                    r.id === ranking.id 
+                      ? { ...r, avatarUrl: profileResponse.data!.data.avatarUrl || DEFAULT_AVATAR } 
+                      : r
+                  )
+                );
+              }
+            } catch (error) {
+              console.error(`사용자 ${ranking.id}의 아바타 정보를 가져오는데 실패했습니다:`, error);
+              // 오류가 발생해도 다음 사용자 진행
             }
             
-            return {
-              ...ranking,
-              rank: index + 1, // 순위 추가
-              avatarUrl
-            };
-          })
-        );
+            // 서버 부하 방지를 위한 짧은 대기
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        };
         
-        setRankings(rankingsWithAvatars);
+        // 백그라운드에서 실행
+        updateAvatars();
       }
     } catch (error) {
       console.error("랭킹 정보를 가져오는데 실패했습니다:", error);

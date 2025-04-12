@@ -3,7 +3,11 @@
 import SockJS from "sockjs-client";
 import { Client } from "@stomp/stompjs";
 
-const socket = new SockJS(process.env.NEXT_PUBLIC_WAS_WS_HOST!!);
+// SockJS 연결 옵션을 개선 - 전송 방식 순서 변경 및 타임아웃 증가
+const socket = new SockJS(process.env.NEXT_PUBLIC_WAS_WS_HOST || "http://localhost:8080/ws", null, {
+  transports: ['xhr-streaming', 'xhr-polling', 'websocket'], // websocket을 마지막 옵션으로 변경
+  timeout: 20000 // 타임아웃 시간을 20초로 증가
+});
 
 let stompClientConnected = false;
 // 구독 대기 큐 추가
@@ -23,15 +27,13 @@ const publishQueue: {
 // Java 객체 문자열 파싱 함수
 const parseJavaObjectString = (text: string): any => {
   try {
-    // WebSocketChatMessageResponse[type=CHAT, content="ㅎㅇㅎㅇ", senderId=박영준, senderName=박영준, timestamp=1744472559884, roomId=lobby]
-    // 위와 같은 형식의 문자열을 파싱
 
     // 객체 이름과 내용 분리
     const match = text.match(/(\w+)\[(.*)\]/);
     if (!match) return null;
     
     const className = match[1]; // WebSocketChatMessageResponse
-    const fieldsString = match[2]; // type=CHAT, content="ㅎㅇㅎㅇ", senderId=박영준, ...
+    const fieldsString = match[2];
     
     // 필드 파싱
     const result: Record<string, any> = { _className: className };
@@ -102,6 +104,8 @@ let stompClient = new Client({
     console.log("[STOMP]", str);
   },
   reconnectDelay: 5000,
+  heartbeatIncoming: 25000,
+  heartbeatOutgoing: 25000,
   onConnect: () => {
     console.log("✅ WebSocket 연결 성공");
     stompClientConnected = true;
@@ -226,8 +230,11 @@ const reconnectWebSocket = () => {
       stompClientConnected = false;
     }
     
-    // 새로운 소켓 연결 생성
-    const newSocket = new SockJS(process.env.NEXT_PUBLIC_WAS_WS_HOST!!);
+    // 새로운 소켓 연결 생성 - 개선된 설정 적용
+    const newSocket = new SockJS(process.env.NEXT_PUBLIC_WAS_WS_HOST || "http://localhost:8080/ws", null, {
+      transports: ['xhr-streaming', 'xhr-polling', 'websocket'], // websocket을 마지막 옵션으로 변경
+      timeout: 20000 // 타임아웃 시간을 20초로 증가
+    });
     
     // 새 STOMP 클라이언트 생성
     stompClient = new Client({
@@ -237,6 +244,8 @@ const reconnectWebSocket = () => {
         console.log("[STOMP]", str);
       },
       reconnectDelay: 5000,
+      heartbeatIncoming: 25000,
+      heartbeatOutgoing: 25000,
       onConnect: () => {
         console.log("✅ 웹소켓 재연결 성공");
         stompClientConnected = true;
@@ -252,19 +261,14 @@ const reconnectWebSocket = () => {
           const { destination, body } = publishQueue.shift()!;
           performPublish(destination, body);
         }
-      },
-      onStompError: (frame) => {
-        console.error("❌ STOMP 오류:", frame.headers["message"]);
-        console.error("상세 내용:", frame.body);
-      },
+      }
     });
     
-    // 새 클라이언트 활성화
     stompClient.activate();
     
     return true;
   } catch (error) {
-    console.error("웹소켓 재연결 중 오류 발생:", error);
+    console.error("웹소켓 재연결 실패:", error);
     return false;
   }
 };

@@ -1,5 +1,6 @@
 import client from "@/lib/backend/client";
 import { Friend, FriendRequest, FriendSearchResult } from "./types";
+import { fetchWithRetry, fetchWithAuthErrorHandling } from '@/lib/utils/apiUtils';
 
 // API 기본 URL 설정
 const API_BASE_URL = process.env.NEXT_PUBLIC_WAS_HOST || 'https://quizzle.p-e.kr';
@@ -7,8 +8,15 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_WAS_HOST || 'https://quizzle.p-e.kr
 // 친구 목록 조회
 export const getFriendList = async (): Promise<Friend[]> => {
   try {
-    const { data } = await client.GET("/api/v1/friends", {});
-    return (data?.data || []) as Friend[];
+    // 인증 오류 처리 및 재시도 로직 적용
+    const response = await fetchWithAuthErrorHandling(
+      () => fetchWithRetry(
+        () => client.GET("/api/v1/friends", {}),
+        1 // 최대 1번 재시도
+      )
+    );
+    
+    return (response.data?.data || []) as Friend[];
   } catch (error) {
     console.error("친구 목록을 불러오는데 실패했습니다:", error);
     return [];
@@ -18,8 +26,15 @@ export const getFriendList = async (): Promise<Friend[]> => {
 // 친구 요청 목록 조회
 export const getFriendRequests = async (): Promise<FriendRequest[]> => {
   try {
-    const { data } = await client.GET("/api/v1/friends/requests", {});
-    return (data?.data || []) as FriendRequest[];
+    // 인증 오류 처리 및 재시도 로직 적용
+    const response = await fetchWithAuthErrorHandling(
+      () => fetchWithRetry(
+        () => client.GET("/api/v1/friends/requests", {}),
+        1 // 최대 1번 재시도
+      )
+    );
+    
+    return (response.data?.data || []) as FriendRequest[];
   } catch (error) {
     console.error("친구 요청 목록을 불러오는데 실패했습니다:", error);
     return [];
@@ -31,45 +46,37 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
   try {
     console.log(`검색 시도: nickname=${nickname}`);
     
-    // 직접 fetch로 호출 - 환경변수에 따른 API 주소 사용
-    const url = `${API_BASE_URL}/api/v1/members/search?nickname=${encodeURIComponent(nickname)}`;
-    console.log(`API 호출: ${url}`);
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include', // 인증 쿠키 포함
+    // client 객체를 통한 API 호출 - 타입 캐스팅으로 타입 오류 해결
+    const response = await (client as any).GET("/api/v1/members/search", {
+      params: {
+        query: { nickname }
+      }
     });
     
-    // HTTP 응답 상태 로깅
-    console.log(`검색 응답 상태: ${response.status}`);
+    const { data, error } = response;
     
-    // 400 에러는 검색 결과가 없는 경우로 처리
-    if (response.status === 400) {
-      console.log('검색 결과가 없습니다 (400 응답)');
-      return [];
+    // 오류 처리
+    if (error) {
+      console.error('검색 중 오류 발생:', error);
+      
+      // HTTP 상태 코드 확인
+      if (response.response?.status === 401 || response.response?.status === 403) {
+        console.error('인증 오류: 로그인이 필요하거나 권한이 없습니다');
+        return [];
+      }
+      
+      if (response.response?.status === 400) {
+        console.log('검색 결과가 없습니다 (400 응답)');
+        return [];
+      }
+      
+      return []; // 기타 오류 시 빈 배열 반환
     }
     
-    // 401 또는 403 오류는 인증 문제로 처리
-    if (response.status === 401 || response.status === 403) {
-      console.error('인증 오류: 로그인이 필요하거나 권한이 없습니다');
-      // 사용자에게 재로그인 유도 등의 처리 필요
-      return [];
-    }
-    
-    // 기타 오류 처리
-    if (!response.ok) {
-      console.error(`검색 실패: ${response.status}`, response);
-      return []; // 오류 발생 시 빈 배열 반환 (에러 화면 방지)
-    }
-    
-    const responseData = await response.json();
-    console.log('검색 결과 데이터:', responseData);
+    console.log('검색 결과 데이터:', data);
     
     // 백엔드에서 반환된 데이터를 FriendSearchResult 형식으로 변환
-    return (responseData?.data || []).map((member: any) => ({
+    return (data?.data || []).map((member: any) => ({
       memberId: member.id,
       nickname: member.nickname,
       avatarUrl: member.avatarUrl,
@@ -78,8 +85,6 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
     })) as FriendSearchResult[];
   } catch (error) {
     console.error("사용자 검색에 실패했습니다:", error);
-    
-    // 애플리케이션 중단 방지를 위해 빈 배열 반환
     return [];
   }
 };
@@ -90,24 +95,26 @@ export const searchUserByNicknameWithClient = async (nickname: string): Promise<
     console.log(`Client 객체로 검색 시도: nickname=${nickname}`);
     
     // client 객체를 any로 캐스팅하여 타입 오류 방지
-    const { data, error, response } = await (client as any).GET("/api/v1/members/search", {
+    const response = await (client as any).GET("/api/v1/members/search", {
       params: {
         query: { nickname }
       }
     });
     
+    const { data, error } = response;
+    
     if (error) {
       // 오류 코드 및 응답 로깅
-      console.error('검색 중 오류 발생:', error, '응답 상태:', (response as any)?.status);
+      console.error('검색 중 오류 발생:', error, '응답 상태:', response.response?.status);
       
       // 400 에러는 검색 결과가 없는 경우로 처리
-      if ((response as any)?.status === 400) {
+      if (response.response?.status === 400) {
         console.log('검색 결과가 없습니다 (400 응답)');
         return [];
       }
       
       // 401 또는 403 오류는 인증 문제로 처리
-      if ((response as any)?.status === 401 || (response as any)?.status === 403) {
+      if (response.response?.status === 401 || response.response?.status === 403) {
         console.error('인증 오류: 로그인이 필요하거나 권한이 없습니다');
         // 사용자에게 재로그인 유도 등의 처리 필요
         return [];
@@ -119,7 +126,7 @@ export const searchUserByNicknameWithClient = async (nickname: string): Promise<
     console.log('검색 결과 데이터:', data);
     
     // 백엔드에서 반환된 데이터를 FriendSearchResult 형식으로 변환
-    return ((data as any)?.data || []).map((member: any) => ({
+    return (data?.data || []).map((member: any) => ({
       memberId: member.id,
       nickname: member.nickname,
       avatarUrl: member.avatarUrl,
@@ -135,9 +142,12 @@ export const searchUserByNicknameWithClient = async (nickname: string): Promise<
 // 친구 요청 보내기
 export const sendFriendRequest = async (memberId: number): Promise<boolean> => {
   try {
-    await client.POST(`/api/v1/friends/{memberId}/request`, {
-      params: { path: { memberId } }
-    });
+    // 인증 오류 처리 및 재시도 로직 적용
+    await fetchWithAuthErrorHandling(
+      () => client.POST(`/api/v1/friends/{memberId}/request`, {
+        params: { path: { memberId } }
+      })
+    );
     return true;
   } catch (error) {
     console.error("친구 요청 전송에 실패했습니다:", error);
@@ -148,9 +158,12 @@ export const sendFriendRequest = async (memberId: number): Promise<boolean> => {
 // 친구 요청 수락
 export const acceptFriendRequest = async (memberId: number): Promise<boolean> => {
   try {
-    await client.POST(`/api/v1/friends/{memberId}/accept`, {
-      params: { path: { memberId } }
-    });
+    // 인증 오류 처리 및 재시도 로직 적용
+    await fetchWithAuthErrorHandling(
+      () => client.POST(`/api/v1/friends/{memberId}/accept`, {
+        params: { path: { memberId } }
+      })
+    );
     return true;
   } catch (error) {
     console.error("친구 요청 수락에 실패했습니다:", error);
@@ -161,9 +174,12 @@ export const acceptFriendRequest = async (memberId: number): Promise<boolean> =>
 // 친구 요청 거절
 export const rejectFriendRequest = async (memberId: number): Promise<boolean> => {
   try {
-    await client.POST(`/api/v1/friends/{memberId}/reject`, {
-      params: { path: { memberId } }
-    });
+    // 인증 오류 처리 및 재시도 로직 적용
+    await fetchWithAuthErrorHandling(
+      () => client.POST(`/api/v1/friends/{memberId}/reject`, {
+        params: { path: { memberId } }
+      })
+    );
     return true;
   } catch (error) {
     console.error("친구 요청 거절에 실패했습니다:", error);
@@ -174,9 +190,12 @@ export const rejectFriendRequest = async (memberId: number): Promise<boolean> =>
 // 친구 삭제
 export const deleteFriend = async (memberId: number): Promise<boolean> => {
   try {
-    await client.DELETE(`/api/v1/friends/{memberId}`, {
-      params: { path: { memberId } }
-    });
+    // 인증 오류 처리 및 재시도 로직 적용
+    await fetchWithAuthErrorHandling(
+      () => client.DELETE(`/api/v1/friends/{memberId}`, {
+        params: { path: { memberId } }
+      })
+    );
     return true;
   } catch (error) {
     console.error("친구 삭제에 실패했습니다:", error);
