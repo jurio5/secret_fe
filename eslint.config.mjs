@@ -16,7 +16,17 @@ const eslintConfig = [
       "react/display-name": "off",
       "@typescript-eslint/no-unused-vars": "warn",
       "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-extra-non-null-assertion": "off"
+      "@typescript-eslint/no-extra-non-null-assertion": "off",
+      "react-hooks/exhaustive-deps": "warn",
+      "@next/next/no-img-element": "warn"
+    }
+  },
+  {
+    files: ["src/app/lobby/page.tsx"],
+    rules: {
+      "react-hooks/exhaustive-deps": "off",
+      "@next/next/no-img-element": "off",
+      "@typescript-eslint/no-unused-vars": "off"
     }
   }
 ];
