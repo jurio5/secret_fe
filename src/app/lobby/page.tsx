@@ -5,6 +5,7 @@ import AppLayout from "@/components/common/AppLayout";
 import client from "@/lib/backend/client";
 import { components } from "@/lib/backend/apiV1/schema";
 import { subscribe, unsubscribe, publish } from "@/lib/backend/stompClient";
+import Toast, { ToastProps } from "@/components/common/Toast";
 
 interface User {
   id: number;
@@ -62,15 +63,66 @@ function LobbyContent() {
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
+  const [showNicknameModal, setShowNicknameModal] = useState<boolean>(false);
+  const [newNickname, setNewNickname] = useState<string>("");
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [toast, setToast] = useState<ToastProps | null>(null);
+
+  // 세션 무효화 오류 확인 함수
+  const checkSessionError = (error: any): boolean => {
+    const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
+    return errorStr.includes("Session was invalidated") || 
+           errorStr.includes("HTTP Status 500 – Internal Server Error");
+  };
+
+  // 로그인 페이지로 리다이렉트 함수
+  const redirectToLogin = async () => {
+    try {
+      // 백엔드에 로그아웃 요청 (세션 및 HTTP-Only 쿠키 삭제)
+      await client.DELETE("/api/v1/members");
+      console.log("로그아웃 API 호출 성공");
+      
+      // 백엔드 로그아웃 API가 처리하지 않는 클라이언트 측 쿠키 수동 삭제
+      document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+      document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=" + window.location.hostname;
+      
+      // 로컬 스토리지 정리
+      localStorage.clear();
+    } catch (error) {
+      console.error("로그아웃 API 호출 실패:", error);
+      // 실패해도 계속 진행 - 수동으로 쿠키 삭제 시도
+      document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+      document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=" + window.location.hostname;
+      localStorage.clear();
+    }
+    
+    // 토스트 메시지로 사용자에게 알림
+    setToast({
+      type: "error", 
+      message: "로그인 세션이 만료되었습니다. 다시 로그인해주세요.",
+      duration: 3000
+    });
+    
+    // 3초 후 로그인 페이지로 리다이렉트
+    setTimeout(() => {
+      window.location.href = "/login";
+    }, 3000);
+  };
 
   async function loadRooms() {
     try {
       const res = await client.GET("/api/v1/rooms") as ApiResponse<RoomResponse[]>;
 
       if (res.error) {
-        // 오류 객체 전체를 로깅하고, 옵셔널 체이닝과 기본 메시지 사용
         console.error('룸 정보를 가져오는데 실패했습니다:', res.error?.message || '상세 오류 정보 없음');
         console.error('전체 오류 객체:', res.error);
+        
+        // 세션 오류 확인
+        if (checkSessionError(res.error)) {
+          redirectToLogin();
+          return;
+        }
+        
         return;
       }
 
@@ -81,6 +133,13 @@ function LobbyContent() {
       }
     } catch (error) {
       console.error("룸 정보를 가져오는데 실패했습니다:", error);
+      
+      // 세션 오류 확인
+      if (checkSessionError(error)) {
+        redirectToLogin();
+        return;
+      }
+      
       setRooms([]);
     }
   }
@@ -128,8 +187,117 @@ function LobbyContent() {
     return updatedUsers;
   };
 
+  // 현재 로그인한 사용자 정보 가져오기
+  const fetchCurrentUser = async () => {
+    try {
+      const response = await client.GET("/api/v1/members/me") as ApiResponse<User>;
+      
+      if (response.error) {
+        console.error("사용자 정보를 가져오는데 실패했습니다:", response.error);
+        
+        // 세션 오류 확인
+        if (checkSessionError(response.error)) {
+          redirectToLogin();
+          return;
+        }
+        
+        return;
+      }
+      
+      if (response.data?.data) {
+        setCurrentUser(response.data.data);
+        
+        // REGISTER 상태인 경우 닉네임 모달 표시
+        if (response.data.data.status === "REGISTER") {
+          setShowNicknameModal(true);
+        }
+      }
+    } catch (error) {
+      console.error("사용자 정보를 가져오는데 실패했습니다:", error);
+      
+      // 세션 오류 확인
+      if (checkSessionError(error)) {
+        redirectToLogin();
+      }
+    }
+  };
+
+  // 닉네임 변경 함수
+  const handleChangeNickname = async () => {
+    if (!newNickname.trim()) {
+      alert("닉네임을 입력해주세요.");
+      return;
+    }
+    
+    try {
+      const response = await client.PATCH("/api/v1/members/{memberId}/nickname", {
+        params: {
+          path: { memberId: 0 } // 'me' 대신 0 사용 (API에서 현재 사용자를 의미)
+        },
+        body: { nickname: newNickname }
+      }) as ApiResponse<User>;
+      
+      if (response.error) {
+        // 세션 오류 확인
+        if (checkSessionError(response.error)) {
+          redirectToLogin();
+          return;
+        }
+        
+        alert(response.error?.message || "닉네임 변경에 실패했습니다.");
+        return;
+      }
+      
+      // 성공 시 사용자 정보 다시 로드
+      await fetchCurrentUser();
+      setShowNicknameModal(false);
+      // 로컬 스토리지에서 REGISTER 상태 제거
+      localStorage.removeItem('quizzle_register_status');
+      
+      // 성공 메시지 토스트 표시
+      setToast({
+        type: "success",
+        message: "닉네임이 성공적으로 변경되었습니다!",
+        duration: 3000
+      });
+    } catch (error) {
+      console.error("닉네임 변경에 실패했습니다:", error);
+      
+      // 세션 오류 확인
+      if (checkSessionError(error)) {
+        redirectToLogin();
+        return;
+      }
+      
+      alert("닉네임 변경에 실패했습니다.");
+    }
+  };
+
   useEffect(() => {
+    // URL에서 REGISTER 파라미터 확인
+    const params = new URLSearchParams(window.location.search);
+    const isRegister = params.get('status') === 'REGISTER';
+    
+    if (isRegister) {
+      // REGISTER 상태를 로컬 스토리지에 저장
+      localStorage.setItem('quizzle_register_status', 'true');
+      // URL에서 파라미터 제거 (히스토리 유지)
+      const newUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, document.title, newUrl);
+      // 닉네임 모달 표시
+      setShowNicknameModal(true);
+    }
+    
     loadRooms();
+    fetchCurrentUser(); // 사용자 정보 가져오기
+
+    // 로컬 스토리지에서 REGISTER 상태 확인
+    const hasRegisterStatus = localStorage.getItem('quizzle_register_status') === 'true';
+    
+    // URL에 파라미터가 없지만 로컬 스토리지에 상태가 있는 경우 닉네임 모달 표시
+    if (!isRegister && hasRegisterStatus) {
+      setShowNicknameModal(true);
+    }
 
     // 룸 업데이트 구독
     subscribe("/topic/lobby", (_) => {
@@ -216,6 +384,16 @@ function LobbyContent() {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {/* 토스트 메시지 표시 */}
+      {toast && (
+        <Toast
+          type={toast.type}
+          message={toast.message}
+          duration={toast.duration}
+          onClose={() => setToast(null)}
+        />
+      )}
+      
       <div className="flex flex-col lg:flex-row gap-8">
         <div className="flex-grow">
           <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-xl p-6 mb-8">
@@ -325,6 +503,37 @@ function LobbyContent() {
           </div>
         </div>
       </div>
+
+      {/* 닉네임 변경 모달 */}
+      {showNicknameModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-800/80 border border-gray-700 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6">
+            <h3 className="text-xl font-bold text-white mb-4">닉네임 설정</h3>
+            <p className="text-gray-300 mb-4">
+              퀴즐에 오신 것을 환영합니다! 서비스를 이용하기 위해 닉네임을 설정해주세요.
+            </p>
+            
+            <div className="mb-4">
+              <input
+                type="text"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white"
+                placeholder="닉네임을 입력하세요"
+                value={newNickname}
+                onChange={(e) => setNewNickname(e.target.value)}
+                maxLength={10}
+              />
+              <p className="text-xs text-gray-400 mt-1">최대 10자까지 입력 가능합니다.</p>
+            </div>
+            
+            <button
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-4 py-2 rounded-lg font-medium"
+              onClick={handleChangeNickname}
+            >
+              닉네임 저장
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 프로필 모달 */}
       {showProfileModal && selectedUser && (
@@ -451,7 +660,7 @@ function LobbyContent() {
 
 export default function LobbyPage() {
   return (
-    <AppLayout>
+    <AppLayout showBeforeUnloadWarning={true}>
       <Suspense
         fallback={
           <div className="flex justify-center items-center min-h-[60vh]">
