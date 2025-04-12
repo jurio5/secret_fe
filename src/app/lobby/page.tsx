@@ -5,12 +5,22 @@ import client from "@/lib/backend/client";
 import { components } from "@/lib/backend/apiV1/schema";
 import { subscribe, unsubscribe, publish, isConnected, getConnectionStatus } from "@/lib/backend/stompClient";
 
+// 쿠키 관련 유틸리티 함수 추가
+function getCookieValue(name: string) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop()?.split(';').shift();
+  return undefined;
+}
+
+// 컴포넌트 가져오기
 import UserProfile from "@/components/lobby/UserProfile";
 import UserList from "@/components/lobby/UserList";
 import StatCards from "@/components/lobby/StatCards";
 import RoomList from "@/components/lobby/RoomList";
 import Chat from "@/components/lobby/Chat";
 
+// 서버 응답 타입 정의
 interface ApiResponse<T> {
   data: {
     data: T;
@@ -20,6 +30,7 @@ interface ApiResponse<T> {
   };
 }
 
+// 사용자 타입 정의
 interface User {
   id: string | number;
   username: string;
@@ -29,6 +40,7 @@ interface User {
 function LobbyContent() {
   const [rooms, setRooms] = useState<components["schemas"]["RoomResponse"][]>([]);
   
+  // 채팅 관련 상태
   const [chatMessages, setChatMessages] = useState<Array<{
     id: number;
     sender: string;
@@ -37,14 +49,38 @@ function LobbyContent() {
     type: string;
   }>>([]);
   
+  // WebSocket 연결 상태
   const [socketConnected, setSocketConnected] = useState<boolean | null>(null);
   
+  // 사용자 목록 (예시 데이터)
   const [users] = useState<User[]>([
     { id: 1, username: "사용자1", color: "purple-300" },
     { id: 2, username: "사용자2", color: "green-300" },
     { id: 3, username: "사용자3", color: "blue-300" }
   ]);
 
+  // chatMessages 상태 변화 추적
+  useEffect(() => {
+    console.log("채팅 메시지 상태 업데이트:", chatMessages);
+  }, [chatMessages]);
+
+  // 쿠키 확인 로직 추가
+  useEffect(() => {
+    // 페이지 로드시와 10초마다 쿠키 확인
+    const checkCookies = () => {
+      const cookies = document.cookie;
+      console.log("현재 쿠키:", cookies);
+      const token = getCookieValue('access_token');
+      console.log("액세스 토큰 존재 여부:", token ? "있음" : "없음");
+    };
+    
+    checkCookies();
+    const interval = setInterval(checkCookies, 10000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  // 방 목록 로드 함수
   async function loadRooms() {
     try {
       const res = await client.GET("/api/v1/rooms") as ApiResponse<components["schemas"]["RoomResponse"][]>;
@@ -61,23 +97,29 @@ function LobbyContent() {
     }
   }
 
+  // 웹소켓 연결 및 구독 설정
   useEffect(() => {
     loadRooms();
 
+    // STOMP 클라이언트 연결 상태 주기적 확인
     const checkConnectionStatus = () => {
       const status = isConnected();
       setSocketConnected(status);
       console.log("STOMP 연결 상태:", status ? "연결됨" : "연결 끊김", getConnectionStatus());
     };
     
+    // 초기 연결 상태 확인
     checkConnectionStatus();
     
+    // 주기적으로 연결 상태 확인 (3초마다)
     const interval = setInterval(checkConnectionStatus, 3000);
 
+    // 방 목록 업데이트 구독
     subscribe("/topic/lobby", (_) => {
       loadRooms();
     });
 
+    // 로비 채팅 구독
     subscribe("/topic/lobby/chat", (message) => {
       handleChatMessage(message);
     });
@@ -89,7 +131,9 @@ function LobbyContent() {
     };
   }, []);
 
+  // 테스트 메시지 생성 (실제 구현에서는 제거)
   useEffect(() => {
+    // 초기 더미 메시지 추가
     if (chatMessages.length === 0) {
       const dummyMessages = [
         {
@@ -125,6 +169,7 @@ function LobbyContent() {
     }
   }, []);
 
+  // 채팅 메시지 처리 함수
   const handleChatMessage = (message: any) => {
     try {
       console.log("수신된 채팅 메시지:", message);
@@ -132,12 +177,14 @@ function LobbyContent() {
       const now = new Date();
       const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       
+      // 서버에서 받은 메시지 형식에 따라 처리
       if (typeof message === 'string') {
         try {
           const parsedMessage = JSON.parse(message);
           console.log("파싱된 문자열 메시지:", parsedMessage);
           addChatMessage(parsedMessage);
         } catch (e) {
+          // 단순 문자열인 경우
           console.log("문자열 메시지 처리:", message);
           addChatMessage({
             id: Date.now(),
@@ -148,26 +195,46 @@ function LobbyContent() {
           });
         }
       } else {
+        // 이미 객체인 경우
         console.log("객체 메시지 처리:", message);
         
+        // 중첩된 JSON 구조 처리
         let messageContent = "";
         let sender = "";
         let messageType = "CHAT";
+        let clientMessageId: number | null = null;
         
+        // content 필드에 JSON 문자열이 있는 경우 (서버 로그에서 확인된 중첩 구조)
         if (message.content && typeof message.content === 'string' && message.content.includes('"type"')) {
           try {
             const innerMessage = JSON.parse(message.content);
+            console.log("내부 메시지 파싱:", innerMessage);
             messageContent = innerMessage.content || "";
             sender = innerMessage.sender || "";
             messageType = innerMessage.type || "CHAT";
+            clientMessageId = innerMessage.clientMessageId;
             
-            if (sender === "나") {
-              console.log("자신이 보낸 메시지는 중복 표시하지 않음");
-              return;
-            }
+            // 사용자 정보가 포함된 모든 채팅 메시지를 표시하고 로깅
+            console.log("메시지 발신자 정보:", {
+              내부발신자: sender,
+              외부발신자ID: message.senderId,
+              외부발신자이름: message.senderName,
+              클라이언트메시지ID: clientMessageId
+            });
             
+            // 서버에서 온 발신자 이름으로 대체
             if (message.senderName) {
               sender = message.senderName;
+            }
+
+            // 클라이언트 ID로 자신이 보낸 메시지인지 확인 (이미 추가된 경우 무시)
+            if (clientMessageId) {
+              // 이미 메시지 목록에 있는지 확인
+              const isDuplicate = chatMessages.some(msg => msg.id === clientMessageId);
+              if (isDuplicate) {
+                console.log("이미 표시된 메시지 무시 (ID 기반):", clientMessageId);
+                return;
+              }
             }
           } catch (e) {
             console.error("중첩된 메시지 파싱 실패:", e);
@@ -175,13 +242,14 @@ function LobbyContent() {
             sender = message.senderName || message.senderId || "알 수 없음";
           }
         } else {
+          // 기존 로직 유지
           messageContent = message.content || message.message || message.text || message.body || JSON.stringify(message);
           sender = message.sender || message.user || message.username || message.senderName || "알 수 없음";
           messageType = message.type || "CHAT";
         }
         
         addChatMessage({
-          id: Date.now(),
+          id: clientMessageId || Date.now(),
           sender: sender,
           message: messageContent,
           timestamp: message.timestamp ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : timeString,
@@ -193,6 +261,7 @@ function LobbyContent() {
     }
   };
 
+  // 채팅 메시지 추가 함수
   const addChatMessage = (message: {
     id: number;
     sender: string;
@@ -203,15 +272,18 @@ function LobbyContent() {
     setChatMessages((prev) => [...prev, message]);
   };
 
+  // 채팅 메시지 전송 함수
   const sendChatMessage = (messageInput: string) => {
     if (messageInput.trim() === "") return;
 
     const now = new Date();
     const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const messageId = Date.now(); // 메시지 고유 ID 생성
 
+    // 클라이언트 측에서 메시지 미리보기 추가
     const newMessage = {
-      id: Date.now(),
-      sender: "나",
+      id: messageId,
+      sender: "나", // 실제로는 사용자 닉네임을 사용
       message: messageInput,
       timestamp: timeString,
       type: "CHAT"
@@ -219,17 +291,21 @@ function LobbyContent() {
 
     addChatMessage(newMessage);
 
+    // 서버로 메시지 전송 - 메시지 ID 추가
     publish("/app/lobby/chat", {
       type: "CHAT",
       content: messageInput,
-      sender: "나",
-      timestamp: now.toISOString()
+      sender: "나", // 실제로는 사용자 정보를 포함해야 함
+      timestamp: now.toISOString(),
+      clientMessageId: messageId // 클라이언트 메시지 ID 추가
     });
   };
 
   return (
     <div className="text-white h-screen flex">
+      {/* 왼쪽 사이드바 (프로필 및 사용자 목록) */}
       <div className="w-64 bg-[#0a0b14]/80 backdrop-blur-sm border-r border-indigo-900/20 flex flex-col overflow-hidden">
+        {/* 프로필 컴포넌트 */}
         <UserProfile 
           username="테스터박"
           level={1}
@@ -237,10 +313,13 @@ function LobbyContent() {
           rank="Bronze"
         />
         
+        {/* 사용자 목록 컴포넌트 */}
         <UserList users={users} />
       </div>
       
+      {/* 메인 컨텐츠 */}
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* 상단 메뉴 탭 */}
         <div className="bg-[#0a0b14] h-12 border-b border-indigo-900/20 px-4 flex items-center">
           <div className="flex space-x-4">
             <div className="px-3 py-1 rounded-md text-sm bg-indigo-600 text-white">전체</div>
@@ -258,9 +337,13 @@ function LobbyContent() {
           </div>
         </div>
         
+        {/* 메인 콘텐츠 영역 */}
         <div className="flex-1 flex overflow-hidden">
+          {/* 중앙 영역: 방 목록 + 채팅 */}
           <div className="flex-1 flex flex-col overflow-hidden">
+            {/* 방 목록 영역 */}
             <div className="flex-[2] p-4 overflow-y-auto min-h-0">
+              {/* 통계 카드 컴포넌트 */}
               <StatCards 
                 username="테스터박"
                 level={1}
@@ -268,12 +351,14 @@ function LobbyContent() {
                 points={0}
               />
 
+              {/* 방 목록 컴포넌트 */}
               <RoomList 
                 rooms={rooms}
                 onRefresh={loadRooms}
               />
             </div>
             
+            {/* 채팅 컴포넌트 */}
             <Chat 
               messages={chatMessages}
               socketConnected={socketConnected}
@@ -289,12 +374,15 @@ function LobbyContent() {
 export default function LobbyPage() {
   return (
     <div className="h-screen w-full bg-[#05060f] flex flex-col overflow-hidden">
+      {/* 배경 그라데이션 효과 */}
       <div className="fixed inset-0 bg-[#05060f] z-0">
+        {/* 블러 그라데이션 효과 */}
         <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-indigo-900/5 via-[#05060f] to-purple-900/5"></div>
         <div className="absolute top-[-10%] right-[-5%] w-[40%] h-[40%] bg-indigo-600/5 rounded-full blur-[100px]"></div>
         <div className="absolute bottom-[-10%] left-[-5%] w-[40%] h-[40%] bg-purple-600/5 rounded-full blur-[100px]"></div>
       </div>
       
+      {/* 컨텐츠 영역 */}
       <div className="relative z-10 w-full h-full flex flex-col">
         <Suspense
           fallback={
