@@ -6,6 +6,8 @@ import client from "@/lib/backend/client";
 import { components } from "@/lib/backend/apiV1/schema";
 import { subscribe, unsubscribe, publish, reconnectWebSocket } from "@/lib/backend/stompClient";
 import Toast, { ToastProps } from "@/components/common/Toast";
+import { FaTrophy, FaUserFriends, FaUser, FaComments } from "react-icons/fa";
+import { useRouter } from "next/navigation";
 
 interface User {
   id: number;
@@ -74,8 +76,11 @@ function LobbyContent() {
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newChatMessage, setNewChatMessage] = useState<string>("");
   const [showChat, setShowChat] = useState<boolean>(true);
+  const [showFriendList, setShowFriendList] = useState<boolean>(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-
+  
+  const router = useRouter();
+  
   // 세션 무효화 오류 확인 함수
   const checkSessionError = (error: any): boolean => {
     const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
@@ -701,6 +706,15 @@ function LobbyContent() {
     }
   }, [chatMessages]);
 
+  // 사용자 프로필 클릭 핸들러
+  const handleUserProfileClick = () => {
+    if (currentUser) {
+      handleUserClick(currentUser);
+    } else {
+      alert("로그인이 필요합니다.");
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-8 flex flex-col h-full">
       {/* 토스트 메시지 표시 */}
@@ -713,7 +727,111 @@ function LobbyContent() {
         />
       )}
       
-      <div className="flex flex-col lg:flex-row gap-8 flex-grow mb-4">
+      {/* 게임스러운 상단 네비게이션 바 추가 */}
+      <div className="fixed top-0 left-0 right-0 z-40 bg-gradient-to-r from-gray-900/90 to-gray-800/90 backdrop-blur-md border-b border-gray-700/50 shadow-lg">
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            {/* 로고 */}
+            <div className="flex items-center">
+              <div className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-indigo-500 text-transparent bg-clip-text">Quizzle</div>
+            </div>
+            
+            {/* 중앙 네비게이션 버튼들 */}
+            <div className="flex items-center space-x-1">
+              <button 
+                onClick={() => alert("친구 목록 기능은 준비 중입니다.")}
+                className="group relative px-4 py-2 rounded-lg hover:bg-gray-700/50 transition-all"
+              >
+                <div className="flex flex-col items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400 group-hover:text-blue-300" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z" />
+                  </svg>
+                  <span className="text-xs text-gray-300 group-hover:text-white mt-1">친구</span>
+                </div>
+                <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-1/2 h-0.5 bg-blue-500 opacity-0 group-hover:opacity-100 transition-all"></div>
+              </button>
+              
+              <button className="group relative px-4 py-2 rounded-lg hover:bg-gray-700/50 transition-all">
+                <div className="flex flex-col items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400 group-hover:text-blue-300" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
+                  </svg>
+                  <span className="text-xs text-gray-300 group-hover:text-white mt-1">룸</span>
+                </div>
+                <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-1/2 h-0.5 bg-blue-500 opacity-100 transition-all"></div>
+              </button>
+              
+              <button 
+                onClick={() => alert("랭킹 시스템은 준비 중입니다.")} 
+                className="group relative px-4 py-2 rounded-lg hover:bg-gray-700/50 transition-all"
+              >
+                <div className="flex flex-col items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400 group-hover:text-blue-300" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M6 4.75A.75.75 0 016.75 4h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 4.75zM6 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75A.75.75 0 016 10zm0 5.25a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zM1.99 4.75a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 15.25a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1v-.01zM1.99 10a1 1 0 011-1H3a1 1 0 011 1v.01a1 1 0 01-1 1h-.01a1 1 0 01-1-1V10z" />
+                  </svg>
+                  <span className="text-xs text-gray-300 group-hover:text-white mt-1">랭킹</span>
+                </div>
+                <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-1/2 h-0.5 bg-blue-500 opacity-0 group-hover:opacity-100 transition-all"></div>
+              </button>
+              
+              <button 
+                onClick={() => alert("상점 기능은 준비 중입니다.")} 
+                className="group relative px-4 py-2 rounded-lg hover:bg-gray-700/50 transition-all"
+              >
+                <div className="flex flex-col items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400 group-hover:text-blue-300" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M3 1a1 1 0 000 2h1.22l.305 1.222a.997.997 0 00.01.042l1.358 5.43-.893.892C3.74 11.846 4.632 14 6.414 14H15a1 1 0 000-2H6.414l1-1H14a1 1 0 00.894-.553l3-6A1 1 0 0017 3H6.28l-.31-1.243A1 1 0 005 1H3zM16 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM6.5 18a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
+                  </svg>
+                  <span className="text-xs text-gray-300 group-hover:text-white mt-1">상점</span>
+                </div>
+                <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-1/2 h-0.5 bg-blue-500 opacity-0 group-hover:opacity-100 transition-all"></div>
+              </button>
+            </div>
+            
+            {/* 사용자 프로필 */}
+            {currentUser ? (
+              <div 
+                className="flex items-center bg-gray-800/80 pl-3 pr-4 py-1.5 rounded-full border border-gray-700/50 cursor-pointer hover:bg-gray-700/50 transition-all"
+                onClick={() => handleUserClick(currentUser)}
+              >
+                <div className="w-7 h-7 rounded-full overflow-hidden mr-2 border border-gray-700">
+                  {currentUser.avatarUrl ? (
+                    <img 
+                      src={currentUser.avatarUrl} 
+                      alt={currentUser.nickname} 
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = DEFAULT_AVATAR;
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white font-medium">
+                      {currentUser.nickname.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-white">{currentUser.nickname}</span>
+                  <div className="flex items-center">
+                    <span className="text-xs text-blue-400 mr-2">Lv. {userProfileCache[currentUser.id]?.level || 1}</span>
+                    <span className="text-xs text-yellow-400">
+                      {userProfileCache[currentUser.id]?.point || 0} P
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <button className="px-4 py-1.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-sm transition-all">
+                로그인
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      {/* 메인 컨텐츠 - 상단 네비게이션 바 공간 확보를 위해 마진 추가 */}
+      <div className="flex flex-col lg:flex-row gap-8 flex-grow mb-4 mt-20">
         <div className="flex-grow">
           <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-xl p-6 mb-8">
             <h1 className="text-3xl font-bold text-white mb-4">로비</h1>
@@ -837,7 +955,7 @@ function LobbyContent() {
             <h3 className="text-white font-medium">로비 채팅</h3>
             <div className="flex items-center ml-2">
               <div className={`w-2 h-2 rounded-full mr-1 ${isConnected ? 'bg-green-400' : 'bg-gray-400'}`}></div>
-              <span className="text-xs text-gray-400">{activeUsers.length}명 접속 중</span>
+              <span className="text-sm text-gray-300">{activeUsers.length}명 접속 중</span>
             </div>
           </div>
           <button 
