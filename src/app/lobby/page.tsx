@@ -71,6 +71,10 @@ function LobbyContent() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [toast, setToast] = useState<ToastProps | null>(null);
   const [isChangingNickname, setIsChangingNickname] = useState<boolean>(false);
+  const [isLoadingUser, setIsLoadingUser] = useState<boolean>(false);
+  
+  // 세션 로딩 재시도 횟수 관리
+  const userLoadRetryCountRef = useRef<number>(0);
   
   // 채팅 관련 상태 추가
   const [chatMessages, setChatMessages] = useState<any[]>([]);
@@ -88,16 +92,71 @@ function LobbyContent() {
            errorStr.includes("HTTP Status 500 – Internal Server Error");
   };
 
+  // 세션 정리 함수 - 로그아웃 처리, 쿠키 및 로컬 스토리지 정리
+  const cleanupSession = async () => {
+    try {
+      // 백엔드에 로그아웃 요청 (세션 및 HTTP-Only 쿠키 삭제)
+      await client.DELETE("/api/v1/members").catch(() => {
+        console.log("로그아웃 API 호출 실패, 수동 정리 진행");
+      });
+      
+      // 모든 쿠키 삭제
+      document.cookie.split(";").forEach(c => {
+        document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/");
+      });
+      
+      // 도메인 쿠키도 삭제 시도
+      document.cookie.split(";").forEach(c => {
+        const cookieName = c.replace(/^ +/, "").split("=")[0];
+        document.cookie = `${cookieName}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=${window.location.hostname}`;
+      });
+      
+      // 로컬 스토리지 정리
+      localStorage.clear();
+      
+      // 세션 스토리지 정리
+      sessionStorage.clear();
+      
+      console.log("세션 정리 완료");
+    } catch (error) {
+      console.error("세션 정리 중 오류 발생:", error);
+    }
+  };
+
   // 세션 재연결 시도 함수
-  const tryReconnectSession = async () => {
-    console.log("세션이 만료되었습니다. 자동으로 재연결을 시도합니다.");
+  const tryReconnectSession = async (retryCount = 0, maxRetries = 1) => {
+    console.log(`세션이 만료되었습니다. 자동으로 재연결을 시도합니다. (시도: ${retryCount + 1}/${maxRetries + 1})`);
+    
+    // 이미 최대 재시도 횟수를 초과한 경우
+    if (retryCount > maxRetries) {
+      console.log("최대 재시도 횟수를 초과했습니다. 로그인 페이지로 이동합니다.");
+      
+      // 쿠키와 로컬 스토리지 완전 초기화
+      cleanupSession();
+      
+      // 오류 메시지 토스트 표시
+      setToast({
+        type: "error",
+        message: "세션 복구에 실패했습니다. 다시 로그인해주세요.",
+        duration: 3000
+      });
+      
+      // 3초 후 로그인 페이지로 리다이렉트
+      setTimeout(() => {
+        router.push('/login');
+      }, 3000);
+      
+      return false;
+    }
     
     // 토스트 메시지로 사용자에게 알림
-    setToast({
-      type: "info",
-      message: "세션이 만료되었습니다. 자동으로 재연결 중...",
-      duration: 5000
-    });
+    if (retryCount === 0) {
+      setToast({
+        type: "info",
+        message: "세션이 만료되었습니다. 자동으로 재연결 중...",
+        duration: 5000
+      });
+    }
     
     try {
       // 현재 사용자 정보 다시 가져오기 시도
@@ -151,9 +210,9 @@ function LobbyContent() {
         duration: 3000
       });
       
-      // 3초 후 로그인 페이지로 리다이렉트
+      // 3초 후 로그인 페이지로 리다이렉트 - Next.js Router 사용
       setTimeout(() => {
-        window.location.href = "/login";
+        router.push('/login');
       }, 3000);
       
       return false; // 재연결 실패
@@ -254,24 +313,60 @@ function LobbyContent() {
 
   // 현재 로그인한 사용자 정보 가져오기
   const fetchCurrentUser = async () => {
+    // 동시에 여러 요청이 발생하는 것을 방지
+    if (isLoadingUser) {
+      console.log("사용자 정보를 이미 로딩 중입니다");
+      return;
+    }
+    
+    setIsLoadingUser(true);
+    
     try {
-      const response = await client.GET("/api/v1/members/me") as ApiResponse<User>;
+      console.log("사용자 정보 로딩 중... (시도: " + (userLoadRetryCountRef.current + 1) + ")");
+      
+      // 캐시 방지 헤더 추가
+      const customHeaders = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Request-Time": Date.now().toString() // 무작위 헤더 값으로 캐시 방지
+      };
+      
+      const response = await client.GET("/api/v1/members/me", {
+        headers: customHeaders
+      }) as ApiResponse<User>;
       
       if (response.error) {
         console.error("사용자 정보를 가져오는데 실패했습니다:", response.error);
         
         // 세션 오류 확인
         if (checkSessionError(response.error)) {
-          redirectToLogin();
+          userLoadRetryCountRef.current++; // 재시도 횟수 증가
+          
+          // 최대 재시도 횟수 초과 시에만 로그인 페이지로 리다이렉트
+          if (userLoadRetryCountRef.current > 2) {
+            redirectToLogin();
+          } else {
+            // 잠시 후 다시 시도
+            setTimeout(() => {
+              setIsLoadingUser(false);
+              fetchCurrentUser();
+            }, 1000);
+          }
           return;
         }
         
+        // 재시도 카운트 초기화 (세션 오류가 아닌 다른 오류)
+        userLoadRetryCountRef.current = 0;
         return;
       }
       
       if (response.data?.data) {
         const userData = response.data.data;
         setCurrentUser(userData);
+        
+        // 재시도 카운트 초기화 (성공)
+        userLoadRetryCountRef.current = 0;
         
         // 프로필 캐시 업데이트
         if (userData.id) {
@@ -295,8 +390,24 @@ function LobbyContent() {
       
       // 세션 오류 확인
       if (checkSessionError(error)) {
-        redirectToLogin();
+        userLoadRetryCountRef.current++; // 재시도 횟수 증가
+        
+        // 최대 재시도 횟수 초과 시에만 로그인 페이지로 리다이렉트
+        if (userLoadRetryCountRef.current > 2) {
+          redirectToLogin();
+        } else {
+          // 잠시 후 다시 시도
+          setTimeout(() => {
+            setIsLoadingUser(false);
+            fetchCurrentUser();
+          }, 1000);
+        }
+      } else {
+        // 재시도 카운트 초기화 (세션 오류가 아닌 다른 오류)
+        userLoadRetryCountRef.current = 0;
       }
+    } finally {
+      setIsLoadingUser(false);
     }
   };
 
@@ -740,16 +851,87 @@ function LobbyContent() {
     
     // 로비 채팅 구독
     subscribe("/topic/lobby/chat", (message) => {
+      // 사용자 프로필 정보 확인 및 아바타 URL 가져오기
+      let avatarUrl = undefined;
+      
+      if (message.senderId && message.senderId !== "system") {
+        const senderId = parseInt(message.senderId);
+        // 캐시에서 아바타 URL 찾기
+        avatarUrl = userProfileCache[senderId]?.avatarUrl;
+        
+        // 캐시에 사용자 정보가 없고 발신자가 현재 활성 사용자 목록에 있는 경우
+        if (!avatarUrl) {
+          // 활성 사용자 목록에서 찾기
+          const activeUser = activeUsers.find(user => user.id === senderId);
+          if (activeUser && activeUser.avatarUrl) {
+            avatarUrl = activeUser.avatarUrl;
+            
+            // 캐시 업데이트
+            if (!userProfileCache[senderId]) {
+              userProfileCache[senderId] = {
+                id: senderId,
+                nickname: message.senderName,
+                avatarUrl: activeUser.avatarUrl,
+                lastUpdated: Date.now()
+              };
+            }
+          } else {
+            // 기본 아바타 설정
+            avatarUrl = DEFAULT_AVATAR;
+            
+            // 백그라운드에서 사용자 프로필 정보 가져오기
+            // 단, 많은 요청을 피하기 위해 이미 진행 중인 요청이 없을 때만 실행
+            const fetchUserAvatar = async () => {
+              try {
+                const response = await client.GET(`/api/v1/members/{memberId}`, {
+                  params: { path: { memberId: senderId } }
+                }) as ApiResponse<UserProfile>;
+                
+                if (response.data?.data && response.data.data.avatarUrl) {
+                  // 캐시에 저장할 프로필 데이터와 아바타 URL 추출
+                  const profileData = response.data.data;
+                  const avatarUrl = profileData.avatarUrl;
+                  
+                  // 캐시 업데이트
+                  userProfileCache[senderId] = {
+                    ...profileData,
+                    lastUpdated: Date.now()
+                  };
+                  
+                  // 메시지 업데이트 - 아바타만 변경
+                  setChatMessages(prev => 
+                    prev.map(msg => 
+                      msg.senderId === message.senderId && 
+                      msg.timestamp === message.timestamp
+                        ? { ...msg, avatarUrl: avatarUrl }
+                        : msg
+                    )
+                  );
+                }
+              } catch (error) {
+                console.error(`사용자 ${senderId}의 프로필 정보를 가져오는데 실패했습니다:`, error);
+              }
+            };
+            
+            // 사용자 정보가 캐시에 없고, 로그인된 사용자인 경우에만 백그라운드 요청 수행
+            if (currentUser) {
+              fetchUserAvatar();
+            }
+          }
+        }
+      }
+      
+      // 메시지에 아바타 URL 추가
       setChatMessages((prevMessages) => [...prevMessages, {
         ...message,
-        avatarUrl: message.senderId && userProfileCache[parseInt(message.senderId)]?.avatarUrl
+        avatarUrl: avatarUrl || DEFAULT_AVATAR
       }]);
     });
     
     return () => {
       unsubscribe("/topic/lobby/chat");
     };
-  }, []);
+  }, [activeUsers]);
   
   // 새 메시지가 올 때마다 스크롤 이동
   useEffect(() => {
@@ -1145,11 +1327,14 @@ function LobbyContent() {
               {!currentUser && (
                 <div className="flex items-center justify-between mt-1">
                   <div className="text-xs text-red-400">
-                    {isConnected && activeUsers.length > 0 ? "세션 재연결 중..." : "로그인 후 채팅에 참여할 수 있습니다."}
+                    {isConnected && activeUsers.length > 0 ? 
+                      "세션이 만료되었습니다. 자동으로 재연결 중..." : 
+                      "로그인 후 채팅에 참여할 수 있습니다."
+                    }
                   </div>
                   {isConnected && !currentUser && activeUsers.length > 0 && (
                     <button 
-                      onClick={() => window.location.href = "/login"}
+                      onClick={() => router.push('/login')}
                       className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded transition-colors"
                     >
                       로그인 하기
