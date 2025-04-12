@@ -90,14 +90,21 @@ const UserList: React.FC<UserListProps> = ({ users: initialUsers, isConnected })
       }, 1000);
     };
     
-    if (isConnected) {
+    // 외부에서 사용자 목록이 전달되지 않은 경우에만 자체적으로 구독
+    const hasInitialUsers = initialUsers && initialUsers.length > 0;
+    if (isConnected && !hasInitialUsers) {
       subscribeToUserList();
+    } else {
+      console.log('외부에서 사용자 목록이 제공되거나 연결이 없어 구독하지 않음', {
+        isConnected,
+        hasInitialUsers
+      });
     }
     
     return () => {
       unsubscribe("/topic/lobby/users");
     };
-  }, [isConnected]);
+  }, [isConnected, initialUsers]);
   
   // 디버깅: 사용자 목록 상태 변화 감지
   useEffect(() => {
@@ -111,12 +118,15 @@ const UserList: React.FC<UserListProps> = ({ users: initialUsers, isConnected })
   // 실제 데이터에 더미 데이터를 추가하여 항상 표시
   const displayUsers = [
     // 실제 사용자 (서버에서 받아온 데이터)
-    ...users,
+    ...users.map(user => ({
+      ...user,
+      isDummy: false
+    })),
     // 더미 데이터 (개발용, 실제 데이터가 없을 때만 표시)
     ...(users.length === 0 ? [
-      { id: 1, nickname: "사용자1", color: "purple-300", status: "online" },
-      { id: 2, nickname: "사용자2", color: "green-300", status: "online" },
-      { id: 3, nickname: "사용자3", color: "blue-300", status: "online" }
+      { id: 1, nickname: "사용자1", color: "purple-300", status: "online", isDummy: true },
+      { id: 2, nickname: "사용자2", color: "green-300", status: "online", isDummy: true },
+      { id: 3, nickname: "사용자3", color: "blue-300", status: "online", isDummy: true }
     ] : [])
   ];
   
@@ -170,13 +180,14 @@ const UserList: React.FC<UserListProps> = ({ users: initialUsers, isConnected })
           접속자 목록
         </div>
         <span className="text-xs text-gray-400">
-          {displayUsers.length}명 접속중
+          {users.length > 0 ? users.length : '0 (더미 표시)'} 명 접속중
         </span>
       </h2>
       
       <div className="space-y-2">
         {displayUsers.map(user => (
-          <div key={user.id} className="p-2 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/15 transition-colors text-sm flex items-center gap-2 cursor-pointer">
+          <div key={user.id} 
+              className={`p-2 rounded-lg ${user.isDummy ? 'bg-indigo-500/5 border border-dashed border-indigo-500/20' : 'bg-indigo-500/10 hover:bg-indigo-500/15'} transition-colors text-sm flex items-center gap-2 cursor-pointer`}>
             <div className="w-8 h-8 rounded-full bg-indigo-600/30 flex items-center justify-center text-xs overflow-hidden relative">
               {user.status === 'online' && (
                 <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-500 border border-indigo-900"></span>
@@ -191,7 +202,10 @@ const UserList: React.FC<UserListProps> = ({ users: initialUsers, isConnected })
               </svg>
             </div>
             <div className="flex-1 overflow-hidden">
-              <div className="truncate">{user.nickname}</div>
+              <div className={`truncate ${user.isDummy ? 'text-gray-500 italic' : 'text-white'}`}>
+                {user.nickname}
+                {user.isDummy && <span className="ml-1 text-xs text-indigo-400">(더미)</span>}
+              </div>
               {user.lastActive && (
                 <div className="text-xs text-gray-400">{formatLastActive(user.lastActive)}</div>
               )}
