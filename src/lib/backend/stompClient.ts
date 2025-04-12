@@ -36,32 +36,23 @@ function getCookie(name: string): string | null {
   return null;
 }
 
-const getAccessToken = (): string | null => {
+function getAuthToken(): string | null {
   if (!isBrowser) return null;
   
+  // 1. 쿠키에서 토큰 확인
   const cookieToken = getCookie('access_token');
-  if (cookieToken) {
-    console.log('쿠키에서 토큰 찾음');
-    return cookieToken;
+  if (cookieToken) return cookieToken;
+  
+  // 2. 로컬 스토리지에서 토큰 확인 (필요한 경우)
+  try {
+    const localToken = localStorage.getItem('access_token');
+    if (localToken) return localToken;
+  } catch (e) {
+    console.warn('로컬 스토리지 접근 오류:', e);
   }
   
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlToken = urlParams.get('access_token');
-  if (urlToken) {
-    console.log('URL에서 토큰 찾음');
-    localStorage.setItem('access_token', urlToken);
-    return urlToken;
-  }
-  
-  const localStorageToken = localStorage.getItem('access_token');
-  if (localStorageToken) {
-    console.log('로컬스토리지에서 토큰 찾음');
-    return localStorageToken;
-  }
-  
-  console.warn('토큰을 어디에서도 찾을 수 없음');
   return null;
-};
+}
 
 const getWebSocketUrl = () => {
   if (!isBrowser) return '';
@@ -69,7 +60,7 @@ const getWebSocketUrl = () => {
   const wsHost = process.env.NEXT_PUBLIC_WAS_WS_HOST;
   const baseUrl = wsHost || (process.env.NEXT_PUBLIC_WAS_HOST || 'http://localhost:8080') + '/ws';
   
-  const accessToken = getAccessToken();
+  const accessToken = getAuthToken();
   const url = accessToken 
     ? `${baseUrl}?access_token=${encodeURIComponent(accessToken)}` 
     : baseUrl;
@@ -78,7 +69,9 @@ const getWebSocketUrl = () => {
   return url;
 };
 
-
+/**
+ * 새로운 STOMP 클라이언트를 생성하고 설정하는 함수
+ */
 const createStompClient = () => {
   if (!isBrowser) return null;
   
@@ -86,9 +79,18 @@ const createStompClient = () => {
     socket = new SockJS(getWebSocketUrl());
     console.log('새 SockJS 소켓 생성:', getWebSocketUrl());
     
+    // 인증 헤더 설정
+    const accessToken = getAuthToken();
+    console.log('현재 액세스 토큰 상태:', accessToken ? '존재함' : '없음');
+    
+    const connectHeaders: Record<string, string> = {};
+    if (accessToken) {
+      connectHeaders['Authorization'] = `Bearer ${accessToken}`;
+    }
+    
     const client = new Client({
       webSocketFactory: () => socket,
-      connectHeaders: {},
+      connectHeaders: connectHeaders,
       debug: (str) => {
         console.log("[STOMP]", str);
       },
@@ -97,6 +99,7 @@ const createStompClient = () => {
       heartbeatOutgoing: 4000
     });
 
+    // 이벤트 핸들러 설정
     client.onConnect = function () {
       console.log('STOMP 연결 성공');
       stompClientConnected = true;
@@ -169,6 +172,10 @@ const connect = () => {
   connectionStatus = 'CONNECTING';
   
   try {
+    // 현재 토큰 상태 확인
+    const token = getAuthToken();
+    console.log('WebSocket 연결 시도 - 토큰 상태:', token ? '존재함' : '없음');
+    
     // 기존 클라이언트가 있으면 정리
     if (stompClient) {
       try {
