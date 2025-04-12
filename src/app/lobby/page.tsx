@@ -42,8 +42,11 @@ export interface ChatMessage {
 // 사용자 타입 정의
 interface User {
   id: string | number;
-  username: string;
+  nickname: string;
+  email?: string;
+  status?: string;
   color?: string;
+  lastActive?: number;
 }
 
 function LobbyContent() {
@@ -56,10 +59,10 @@ function LobbyContent() {
   const [socketConnected, setSocketConnected] = useState<boolean | null>(null);
   
   // 사용자 목록 (예시 데이터)
-  const [users] = useState<User[]>([
-    { id: 1, username: "사용자1", color: "purple-300" },
-    { id: 2, username: "사용자2", color: "green-300" },
-    { id: 3, username: "사용자3", color: "blue-300" }
+  const [users, setUsers] = useState<User[]>([
+    { id: 1, nickname: "사용자1", color: "purple-300" },
+    { id: 2, nickname: "사용자2", color: "green-300" },
+    { id: 3, nickname: "사용자3", color: "blue-300" }
   ]);
 
   // chatMessages 상태 변화 추적
@@ -379,14 +382,14 @@ function LobbyContent() {
       <div className="w-64 bg-[#0a0b14]/80 backdrop-blur-sm border-r border-indigo-900/20 flex flex-col overflow-hidden">
         {/* 프로필 컴포넌트 */}
         <UserProfile 
-          username="테스터박"
+          nickname="테스터박"
           level={1}
           points={0}
           rank="Bronze"
         />
         
         {/* 사용자 목록 컴포넌트 */}
-        <UserList users={users} />
+        <UserList users={users} isConnected={socketConnected} />
       </div>
       
       {/* 메인 컨텐츠 */}
@@ -417,7 +420,7 @@ function LobbyContent() {
             <div className="flex-[2] p-4 overflow-y-auto min-h-0">
               {/* 통계 카드 컴포넌트 */}
               <StatCards 
-                username="테스터박"
+                nickname="테스터박"
                 level={1}
                 rank={99}
                 points={0}
