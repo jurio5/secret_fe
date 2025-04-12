@@ -229,10 +229,77 @@ function LobbyContent() {
       return;
     }
     
+    // 사용자 정보가 없는 경우 다시 가져오기 시도
+    if (!currentUser || !currentUser.id) {
+      try {
+        console.log("사용자 정보가 없어 다시 가져오는 중...");
+        
+        // 로컬 스토리지에서 OAuth 리다이렉트 과정에서 저장된 사용자 ID 확인
+        const storedUserId = localStorage.getItem('user_id');
+        if (storedUserId) {
+          console.log("로컬 스토리지에서 사용자 ID 복원:", storedUserId);
+          const userId = parseInt(storedUserId, 10);
+          
+          // 기본 정보로 임시 객체 생성
+          setCurrentUser({
+            id: userId,
+            email: localStorage.getItem('user_email') || '',
+            nickname: 'Temporary',
+            sessions: [],
+            lastActive: Date.now(),
+            status: 'REGISTER'
+          });
+          
+          // 실제 API 호출도 병행
+          client.GET("/api/v1/members/me").catch(err => {
+            console.warn("백그라운드 사용자 정보 가져오기 실패:", err);
+          });
+        } else {
+          // 로컬 스토리지에 정보가 없으면 API 호출
+          const response = await client.GET("/api/v1/members/me") as ApiResponse<User>;
+          
+          if (response.error) {
+            console.error("사용자 정보를 가져오는데 실패했습니다:", response.error);
+            
+            // 세션 오류 확인
+            if (checkSessionError(response.error)) {
+              redirectToLogin();
+              return;
+            }
+            
+            alert("사용자 정보를 가져오는데 실패했습니다. 다시 로그인해주세요.");
+            redirectToLogin();
+            return;
+          }
+          
+          if (response.data?.data) {
+            setCurrentUser(response.data.data);
+          } else {
+            alert("사용자 정보를 가져오는데 실패했습니다. 다시 로그인해주세요.");
+            redirectToLogin();
+            return;
+          }
+        }
+      } catch (error) {
+        console.error("사용자 정보를 가져오는데 실패했습니다:", error);
+        alert("사용자 정보를 가져오는데 실패했습니다. 다시 로그인해주세요.");
+        redirectToLogin();
+        return;
+      }
+    }
+    
+    // 여전히 사용자 정보가 없다면 처리 중단
+    if (!currentUser || !currentUser.id) {
+      console.error("사용자 정보를 가져오는데 실패했습니다.");
+      alert("사용자 정보를 가져오는데 실패했습니다. 다시 로그인해주세요.");
+      redirectToLogin();
+      return;
+    }
+    
     try {
       const response = await client.PATCH("/api/v1/members/{memberId}/nickname", {
         params: {
-          path: { memberId: 0 } // 'me' 대신 0 사용 (API에서 현재 사용자를 의미)
+          path: { memberId: currentUser.id } // 현재 사용자의 실제 ID 사용
         },
         body: { nickname: newNickname }
       }) as ApiResponse<User>;
@@ -253,6 +320,9 @@ function LobbyContent() {
       setShowNicknameModal(false);
       // 로컬 스토리지에서 REGISTER 상태 제거
       localStorage.removeItem('quizzle_register_status');
+      
+      // 이제 닉네임 설정이 완료되었으므로 룸 목록 로드
+      await loadRooms();
       
       // 성공 메시지 토스트 표시
       setToast({
@@ -284,24 +354,35 @@ function LobbyContent() {
       // URL에서 파라미터 제거 (히스토리 유지)
       const newUrl = window.location.pathname + window.location.hash;
       window.history.replaceState({}, document.title, newUrl);
-      // 닉네임 모달 표시
-      setShowNicknameModal(true);
+      
+      // REGISTER 상태일 때 사용자 정보를 먼저 가져옴
+      fetchCurrentUser().then(() => {
+        // 닉네임 모달 표시
+        setShowNicknameModal(true);
+      });
+    } else {
+      // REGISTER 상태가 아닐 때만 API 호출
+      loadRooms();
+      fetchCurrentUser(); // 사용자 정보 가져오기
     }
     
-    loadRooms();
-    fetchCurrentUser(); // 사용자 정보 가져오기
-
     // 로컬 스토리지에서 REGISTER 상태 확인
     const hasRegisterStatus = localStorage.getItem('quizzle_register_status') === 'true';
     
-    // URL에 파라미터가 없지만 로컬 스토리지에 상태가 있는 경우 닉네임 모달 표시
+    // URL에 파라미터가 없지만 로컬 스토리지에 상태가 있는 경우
     if (!isRegister && hasRegisterStatus) {
-      setShowNicknameModal(true);
+      // 사용자 정보를 가져온 후 닉네임 모달 표시
+      fetchCurrentUser().then(() => {
+        setShowNicknameModal(true);
+      });
     }
 
     // 룸 업데이트 구독
     subscribe("/topic/lobby", (_) => {
-      loadRooms();
+      // REGISTER 상태가 아닐 때만 API 호출
+      if (!isRegister && !hasRegisterStatus) {
+        loadRooms();
+      }
     });
 
     // 로비 접속자 목록 구독
