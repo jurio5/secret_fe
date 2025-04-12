@@ -169,11 +169,66 @@ function LobbyContent() {
     subscribe("/topic/lobby/chat", (message) => {
       handleChatMessage(message);
     });
+    
+    // 로비 접속자 목록 구독 - 페이지에서 직접 처리
+    subscribe("/topic/lobby/users", (message) => {
+      try {
+        console.log("로비 접속자 목록 메시지 수신 [페이지]:", message);
+        
+        // 메시지 형식에 따라 적절히 처리
+        let userList = [];
+        if (typeof message === 'string') {
+          userList = JSON.parse(message);
+        } else if (Array.isArray(message)) {
+          userList = message;
+        } else if (message && typeof message === 'object' && message.data) {
+          userList = Array.isArray(message.data) ? message.data : [message.data];
+        }
+        
+        if (Array.isArray(userList) && userList.length > 0) {
+          console.log("사용자 목록 업데이트 [페이지]:", userList);
+          
+          // 사용자 목록 업데이트
+          const formattedUsers = userList.map((user: any) => ({
+            id: user.id || user.email,
+            nickname: user.nickname || user.email?.split('@')[0] || '익명',
+            email: user.email,
+            status: user.status || 'online',
+            lastActive: user.lastActive,
+            color: user.color
+          }));
+          
+          setUsers(formattedUsers);
+        } else {
+          console.log("빈 사용자 목록 또는 형식 오류, 기본 사용자 유지");
+        }
+      } catch (error) {
+        console.error("접속자 목록 처리 중 오류 [페이지]:", error);
+      }
+    });
+    
+    // 주기적으로 사용자 목록 갱신 요청 전송
+    const userListInterval = setInterval(() => {
+      if (isConnected()) {
+        try {
+          publish("/app/lobby/users", {
+            type: "REQUEST",
+            content: "get_users",
+            timestamp: Date.now()
+          });
+          console.log("주기적 접속자 목록 요청 전송");
+        } catch (error) {
+          console.error("주기적 접속자 목록 요청 실패:", error);
+        }
+      }
+    }, 10000); // 10초마다 갱신
 
     return () => {
       unsubscribe("/topic/lobby");
       unsubscribe("/topic/lobby/chat");
+      unsubscribe("/topic/lobby/users");
       clearInterval(interval);
+      clearInterval(userListInterval);
     };
   }, []);
 
@@ -411,6 +466,27 @@ function LobbyContent() {
         
         {/* 사용자 목록 컴포넌트 */}
         <UserList users={users} isConnected={socketConnected} />
+        
+        {/* 접속자 목록 수동 갱신 버튼 (디버깅용) */}
+        <div className="px-4 pb-2">
+          <button 
+            onClick={() => {
+              try {
+                console.log("접속자 목록 수동 갱신 요청");
+                publish("/app/lobby/users", {
+                  type: "REQUEST",
+                  content: "get_users",
+                  timestamp: Date.now()
+                });
+              } catch (error) {
+                console.error("접속자 목록 수동 갱신 요청 실패:", error);
+              }
+            }}
+            className="w-full text-xs py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 rounded-sm transition-colors"
+          >
+            접속자 목록 새로고침
+          </button>
+        </div>
       </div>
       
       {/* 메인 컨텐츠 */}
