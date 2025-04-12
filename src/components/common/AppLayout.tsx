@@ -6,12 +6,14 @@ interface AppLayoutProps {
   children: ReactNode;
   showHomeButton?: boolean;
   showBeforeUnloadWarning?: boolean;
+  showHeader?: boolean;
 }
 
 export default function AppLayout({ 
   children, 
   showHomeButton = true,
-  showBeforeUnloadWarning = false 
+  showBeforeUnloadWarning = false,
+  showHeader = true
 }: AppLayoutProps) {
   
   useEffect(() => {
@@ -38,7 +40,7 @@ export default function AppLayout({
       <div className="absolute bottom-0 left-0 w-2/3 h-2/3 bg-gradient-to-tr from-indigo-800/20 to-blue-800/20 rounded-full blur-3xl transform -translate-x-1/4 translate-y-1/4" />
 
       <div className="relative z-10 flex flex-col min-h-screen">
-        <Header showHomeButton={showHomeButton} />
+        {showHeader && <Header showHomeButton={showHomeButton} />}
         <main className="flex-grow">
           {children}
         </main>
