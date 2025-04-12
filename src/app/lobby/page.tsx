@@ -27,6 +27,7 @@ interface UserProfile {
   point?: number;
   loading?: boolean;
   error?: string;
+  lastUpdated?: number;
 }
 
 // 룸 정보 타입
@@ -205,10 +206,23 @@ function LobbyContent() {
       }
       
       if (response.data?.data) {
-        setCurrentUser(response.data.data);
+        const userData = response.data.data;
+        setCurrentUser(userData);
+        
+        // 프로필 캐시 업데이트
+        if (userData.id) {
+          // 기존 캐시 정보 유지하면서 업데이트
+          userProfileCache[userData.id] = {
+            ...userProfileCache[userData.id],
+            id: userData.id,
+            nickname: userData.nickname,
+            avatarUrl: userData.avatarUrl || DEFAULT_AVATAR,
+            lastUpdated: Date.now()
+          };
+        }
         
         // REGISTER 상태인 경우 닉네임 모달 표시
-        if (response.data.data.status === "REGISTER") {
+        if (userData.status === "REGISTER") {
           setShowNicknameModal(true);
         }
       }
@@ -324,6 +338,26 @@ function LobbyContent() {
       // 이제 닉네임 설정이 완료되었으므로 룸 목록 로드
       await loadRooms();
       
+      // 사용자 프로필 캐시 업데이트 - 변경된 닉네임 반영
+      if (currentUser && currentUser.id) {
+        // 현재 사용자의 프로필 캐시 업데이트
+        if (userProfileCache[currentUser.id]) {
+          userProfileCache[currentUser.id] = {
+            ...userProfileCache[currentUser.id],
+            nickname: newNickname
+          };
+        }
+        
+        // 액티브 유저 목록에서도 사용자 닉네임 업데이트
+        setActiveUsers(prevUsers => 
+          prevUsers.map(user => 
+            user.id === currentUser.id 
+              ? { ...user, nickname: newNickname } 
+              : user
+          )
+        );
+      }
+      
       // 성공 메시지 토스트 표시
       setToast({
         type: "success",
@@ -391,6 +425,14 @@ function LobbyContent() {
       const usersWithAvatars = await fetchUserAvatars(data);
       setActiveUsers(usersWithAvatars);
       setIsConnected(true);
+      
+      // 현재 로그인한 사용자의 정보도 업데이트
+      if (currentUser) {
+        const updatedCurrentUser = usersWithAvatars.find(user => user.id === currentUser.id);
+        if (updatedCurrentUser) {
+          setCurrentUser(updatedCurrentUser);
+        }
+      }
     });
 
     // 접속자 목록 요청
@@ -403,8 +445,32 @@ function LobbyContent() {
   }, []);
 
   const handleUserClick = async (user: User) => {
-    // 캐시에 사용자 정보가 있으면 사용
-    if (userProfileCache[user.id]) {
+    // 클릭한 사용자가 현재 사용자와 동일한 경우, 로컬 상태에서 최신 정보 사용
+    if (currentUser && user.id === currentUser.id) {
+      const userProfile: UserProfile = {
+        id: currentUser.id,
+        nickname: currentUser.nickname,
+        avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR,
+        level: userProfileCache[currentUser.id]?.level || 1,
+        exp: userProfileCache[currentUser.id]?.exp || 0,
+        point: userProfileCache[currentUser.id]?.point || 0,
+        loading: false
+      };
+      
+      // 캐시 업데이트
+      userProfileCache[currentUser.id] = userProfile;
+      
+      setSelectedUser(userProfile);
+      setShowProfileModal(true);
+      return;
+    }
+    
+    // 캐시에 사용자 정보가 있으면서 마지막 업데이트가 1분 이내라면 캐시 사용
+    const now = Date.now();
+    const cacheTime = userProfileCache[user.id]?.lastUpdated || 0;
+    const isCacheValid = now - cacheTime < 60000; // 1분(60000ms) 이내
+    
+    if (userProfileCache[user.id] && isCacheValid) {
       setSelectedUser({
         ...userProfileCache[user.id],
         loading: false
@@ -435,11 +501,15 @@ function LobbyContent() {
         throw new Error(response.error?.message || "프로필 정보를 가져오는데 실패했습니다");
       }
       
-      // 캐시에 저장
-      userProfileCache[user.id] = response.data.data;
+      // 캐시에 저장 (타임스탬프 추가)
+      const profileWithTimestamp = {
+        ...response.data.data,
+        lastUpdated: Date.now()
+      };
+      userProfileCache[user.id] = profileWithTimestamp;
       
       setSelectedUser({
-        ...response.data.data,
+        ...profileWithTimestamp,
         loading: false
       });
     } catch (error) {
