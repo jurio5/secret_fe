@@ -88,38 +88,90 @@ function LobbyContent() {
            errorStr.includes("HTTP Status 500 – Internal Server Error");
   };
 
-  // 로그인 페이지로 리다이렉트 함수
-  const redirectToLogin = async () => {
-    try {
-      // 백엔드에 로그아웃 요청 (세션 및 HTTP-Only 쿠키 삭제)
-      await client.DELETE("/api/v1/members");
-      console.log("로그아웃 API 호출 성공");
-      
-      // 백엔드 로그아웃 API가 처리하지 않는 클라이언트 측 쿠키 수동 삭제
-      document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
-      document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=" + window.location.hostname;
-      
-      // 로컬 스토리지 정리
-      localStorage.clear();
-    } catch (error) {
-      console.error("로그아웃 API 호출 실패:", error);
-      // 실패해도 계속 진행 - 수동으로 쿠키 삭제 시도
-      document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
-      document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=" + window.location.hostname;
-      localStorage.clear();
-    }
+  // 세션 재연결 시도 함수
+  const tryReconnectSession = async () => {
+    console.log("세션이 만료되었습니다. 자동으로 재연결을 시도합니다.");
     
     // 토스트 메시지로 사용자에게 알림
     setToast({
-      type: "error", 
-      message: "로그인 세션이 만료되었습니다. 다시 로그인해주세요.",
-      duration: 3000
+      type: "info",
+      message: "세션이 만료되었습니다. 자동으로 재연결 중...",
+      duration: 5000
     });
     
-    // 3초 후 로그인 페이지로 리다이렉트
-    setTimeout(() => {
-      window.location.href = "/login";
-    }, 3000);
+    try {
+      // 현재 사용자 정보 다시 가져오기 시도
+      const response = await client.GET("/api/v1/members/me") as ApiResponse<User>;
+      
+      if (response.data?.data) {
+        // 성공적으로 사용자 정보를 가져온 경우
+        setCurrentUser(response.data.data);
+        
+        // 성공 메시지 표시
+        setToast({
+          type: "success",
+          message: "세션이 성공적으로 복구되었습니다.",
+          duration: 3000
+        });
+        
+        // 룸 목록 다시 로드
+        loadRooms();
+        
+        return true; // 재연결 성공
+      } else if (response.error) {
+        throw new Error(response.error?.message || "세션 재연결 실패");
+      }
+    } catch (error) {
+      console.error("세션 재연결 시도 중 오류 발생:", error);
+      
+      // 로그아웃 처리 및 쿠키 정리
+      try {
+        // 백엔드에 로그아웃 요청 (세션 및 HTTP-Only 쿠키 삭제)
+        await client.DELETE("/api/v1/members");
+        console.log("로그아웃 API 호출 성공");
+        
+        // 백엔드 로그아웃 API가 처리하지 않는 클라이언트 측 쿠키 수동 삭제
+        document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+        document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=" + window.location.hostname;
+        
+        // 로컬 스토리지 정리
+        localStorage.clear();
+      } catch (logoutError) {
+        console.error("로그아웃 API 호출 실패:", logoutError);
+        // 실패해도 계속 진행 - 수동으로 쿠키 삭제 시도
+        document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+        document.cookie = "needs_nickname=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=" + window.location.hostname;
+        localStorage.clear();
+      }
+      
+      // 오류 메시지 토스트 표시
+      setToast({
+        type: "error",
+        message: "세션을 복구할 수 없습니다. 다시 로그인해주세요.",
+        duration: 3000
+      });
+      
+      // 3초 후 로그인 페이지로 리다이렉트
+      setTimeout(() => {
+        window.location.href = "/login";
+      }, 3000);
+      
+      return false; // 재연결 실패
+    }
+    
+    return false; // 기본적으로 실패 반환
+  };
+
+  // 로그인 페이지로 리다이렉트 함수 - 세션 재연결 시도 후 실패 시에만 리다이렉트
+  const redirectToLogin = async () => {
+    // 먼저, 세션 재연결 시도
+    const reconnectSuccess = await tryReconnectSession();
+    
+    // 재연결에 실패한 경우에만 로그인 페이지로 리다이렉트
+    if (!reconnectSuccess) {
+      // 여기까지 오면 이미 tryReconnectSession에서 에러 처리와 토스트 메시지를 표시했으므로
+      // 추가적인 처리는 필요 없음 (로그인 페이지로의 리다이렉트도 이미 처리됨)
+    }
   };
 
   async function loadRooms() {
@@ -714,6 +766,15 @@ function LobbyContent() {
       alert("로그인이 필요합니다.");
     }
   };
+  
+  // 웹소켓 연결됐지만 세션이 만료된 경우 자동 재연결 시도
+  useEffect(() => {
+    // 웹소켓 연결 상태와 사용자 인증 상태의 불일치 감지
+    // isConnected가 true인데 currentUser가 null인 경우
+    if (isConnected && !currentUser && activeUsers.length > 0) {
+      tryReconnectSession();
+    }
+  }, [isConnected, currentUser, activeUsers.length]);
 
   return (
     <div className="container mx-auto px-4 py-8 flex flex-col h-full">
@@ -1041,6 +1102,19 @@ function LobbyContent() {
                   )}
                 </div>
               ))}
+              
+              {/* 세션 만료 상태일 때 자동 재연결 메시지 표시 */}
+              {isConnected && !currentUser && activeUsers.length > 0 && (
+                <div className="flex justify-center">
+                  <div className="bg-blue-900/30 text-blue-300 text-xs py-2 px-4 rounded-lg border border-blue-800/50 flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    세션이 만료되었습니다. 자동으로 재연결 중...
+                  </div>
+                </div>
+              )}
             </div>
             
             <div className="p-3 border-t border-gray-700">
@@ -1069,8 +1143,18 @@ function LobbyContent() {
                 </button>
               </div>
               {!currentUser && (
-                <div className="text-xs text-red-400 mt-1">
-                  로그인 후 채팅에 참여할 수 있습니다.
+                <div className="flex items-center justify-between mt-1">
+                  <div className="text-xs text-red-400">
+                    {isConnected && activeUsers.length > 0 ? "세션 재연결 중..." : "로그인 후 채팅에 참여할 수 있습니다."}
+                  </div>
+                  {isConnected && !currentUser && activeUsers.length > 0 && (
+                    <button 
+                      onClick={() => window.location.href = "/login"}
+                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded transition-colors"
+                    >
+                      로그인 하기
+                    </button>
+                  )}
                 </div>
               )}
             </div>
