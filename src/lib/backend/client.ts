@@ -43,6 +43,7 @@ type FetchOptions = {
   credentials?: RequestCredentials;
   method?: string;
   body?: any;
+  signal?: AbortSignal;
   [key: string]: any;
 };
 
@@ -50,6 +51,19 @@ const customFetch = (input: RequestInfo | URL, init?: FetchOptions) => {
   const options = init || {};
   
   console.log(`API 요청: ${options.method || 'GET'} ${typeof input === 'string' ? input : input.toString()}`);
+  
+  // 환경 변수에서 타임아웃 값을 가져옴 (기본값 60초)
+  const timeout = parseInt(process.env.NEXT_PUBLIC_REQUEST_TIMEOUT || '60000', 10);
+  
+  // AbortController 설정
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    console.warn(`요청 타임아웃 (${timeout}ms): ${typeof input === 'string' ? input : input.toString()}`);
+    controller.abort();
+  }, timeout);
+  
+  // 기존 signal이 있으면 유지, 없으면 새로 생성한 것 사용
+  options.signal = options.signal || controller.signal;
   
   const accessToken = getAccessToken();
   const headers = options.headers || {};
@@ -66,7 +80,9 @@ const customFetch = (input: RequestInfo | URL, init?: FetchOptions) => {
   
   options.credentials = 'include';
   
-  return fetch(input, options);
+  return fetch(input, options).finally(() => {
+    clearTimeout(timeoutId);
+  });
 };
 
 const client = createClient<paths>({
