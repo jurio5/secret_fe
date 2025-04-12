@@ -1,6 +1,9 @@
 import client from "@/lib/backend/client";
 import { Friend, FriendRequest, FriendSearchResult } from "./types";
 
+// API 기본 URL 설정
+const API_BASE_URL = process.env.NEXT_PUBLIC_WAS_HOST || 'https://quizzle.p-e.kr';
+
 // 친구 목록 조회
 export const getFriendList = async (): Promise<Friend[]> => {
   try {
@@ -23,13 +26,16 @@ export const getFriendRequests = async (): Promise<FriendRequest[]> => {
   }
 };
 
-// 닉네임으로 사용자 검색
+// 닉네임으로 사용자 검색 (환경에 맞게 최적화된 버전)
 export const searchUserByNickname = async (nickname: string): Promise<FriendSearchResult[]> => {
   try {
     console.log(`검색 시도: nickname=${nickname}`);
     
-    // 백엔드 서버 주소 직접 지정
-    const response = await fetch(`http://localhost:8080/api/v1/members/search?nickname=${encodeURIComponent(nickname)}`, {
+    // 직접 fetch로 호출 - 환경변수에 따른 API 주소 사용
+    const url = `${API_BASE_URL}/api/v1/members/search?nickname=${encodeURIComponent(nickname)}`;
+    console.log(`API 호출: ${url}`);
+    
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -37,22 +43,33 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
       credentials: 'include', // 인증 쿠키 포함
     });
     
-    // 400 에러는 검색 결과가 없는 경우일 수 있음
+    // HTTP 응답 상태 로깅
+    console.log(`검색 응답 상태: ${response.status}`);
+    
+    // 400 에러는 검색 결과가 없는 경우로 처리
     if (response.status === 400) {
       console.log('검색 결과가 없습니다 (400 응답)');
       return [];
     }
     
+    // 401 또는 403 오류는 인증 문제로 처리
+    if (response.status === 401 || response.status === 403) {
+      console.error('인증 오류: 로그인이 필요하거나 권한이 없습니다');
+      // 사용자에게 재로그인 유도 등의 처리 필요
+      return [];
+    }
+    
+    // 기타 오류 처리
     if (!response.ok) {
       console.error(`검색 실패: ${response.status}`, response);
       return []; // 오류 발생 시 빈 배열 반환 (에러 화면 방지)
     }
     
-    const data = await response.json();
-    console.log('검색 결과 데이터:', data);
+    const responseData = await response.json();
+    console.log('검색 결과 데이터:', responseData);
     
     // 백엔드에서 반환된 데이터를 FriendSearchResult 형식으로 변환
-    return (data?.data || []).map((member: any) => ({
+    return (responseData?.data || []).map((member: any) => ({
       memberId: member.id,
       nickname: member.nickname,
       avatarUrl: member.avatarUrl,
@@ -61,7 +78,57 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
     })) as FriendSearchResult[];
   } catch (error) {
     console.error("사용자 검색에 실패했습니다:", error);
-    return []; // 오류 발생 시 빈 배열 반환 (에러 화면 방지)
+    
+    // 애플리케이션 중단 방지를 위해 빈 배열 반환
+    return [];
+  }
+};
+
+// client 객체를 이용한 검색 방법 (타입 문제가 있을 경우 위의 함수를 사용)
+export const searchUserByNicknameWithClient = async (nickname: string): Promise<FriendSearchResult[]> => {
+  try {
+    console.log(`Client 객체로 검색 시도: nickname=${nickname}`);
+    
+    // client 객체를 any로 캐스팅하여 타입 오류 방지
+    const { data, error, response } = await (client as any).GET("/api/v1/members/search", {
+      params: {
+        query: { nickname }
+      }
+    });
+    
+    if (error) {
+      // 오류 코드 및 응답 로깅
+      console.error('검색 중 오류 발생:', error, '응답 상태:', (response as any)?.status);
+      
+      // 400 에러는 검색 결과가 없는 경우로 처리
+      if ((response as any)?.status === 400) {
+        console.log('검색 결과가 없습니다 (400 응답)');
+        return [];
+      }
+      
+      // 401 또는 403 오류는 인증 문제로 처리
+      if ((response as any)?.status === 401 || (response as any)?.status === 403) {
+        console.error('인증 오류: 로그인이 필요하거나 권한이 없습니다');
+        // 사용자에게 재로그인 유도 등의 처리 필요
+        return [];
+      }
+      
+      return []; // 기타 오류 시 빈 배열 반환
+    }
+    
+    console.log('검색 결과 데이터:', data);
+    
+    // 백엔드에서 반환된 데이터를 FriendSearchResult 형식으로 변환
+    return ((data as any)?.data || []).map((member: any) => ({
+      memberId: member.id,
+      nickname: member.nickname,
+      avatarUrl: member.avatarUrl,
+      level: member.level,
+      status: 'NONE' // 기본 상태
+    })) as FriendSearchResult[];
+  } catch (error) {
+    console.error("사용자 검색에 실패했습니다:", error);
+    return [];
   }
 };
 
