@@ -20,13 +20,21 @@ interface UserListProps {
 const UserList: React.FC<UserListProps> = ({ users: initialUsers, isConnected }) => {
   const [users, setUsers] = useState<User[]>(initialUsers || []);
 
+  // 디버깅을 위한 로그 추가
+  useEffect(() => {
+    console.log('UserList 컴포넌트 마운트됨');
+    console.log('초기 사용자 데이터:', initialUsers);
+    console.log('WebSocket 연결 상태:', isConnected);
+  }, [initialUsers, isConnected]);
+
   useEffect(() => {
     // 로비 접속자 목록 구독
     const subscribeToUserList = () => {
-      console.log('접속자 목록 구독 시작');
+      console.log('접속자 목록 구독 시작 - 연결 상태:', isConnected);
       
       // 로비 접속자 목록 구독
       subscribe("/topic/lobby/users", (message) => {
+        console.log('접속자 목록 메시지 수신 (원본):', message);
         try {
           console.log('접속자 목록 메시지 수신:', message);
           
@@ -89,6 +97,36 @@ const UserList: React.FC<UserListProps> = ({ users: initialUsers, isConnected })
     { id: 2, nickname: "사용자2", color: "green-300", status: "online" },
     { id: 3, nickname: "사용자3", color: "blue-300", status: "online" }
   ];
+  
+  // 디버깅: 사용자 목록 상태 변화 감지
+  useEffect(() => {
+    console.log('사용자 목록 상태 변경됨:', users);
+    
+    // 더미 데이터 사용 중인지 로그
+    const usingDummyData = users.length === 0;
+    console.log('더미 데이터 사용 중:', usingDummyData ? '예' : '아니오');
+  }, [users]);
+  
+  // 주기적으로 접속자 목록 갱신 요청 보내기
+  useEffect(() => {
+    if (!isConnected) return;
+    
+    // 5초마다 서버에 접속자 목록 요청
+    const requestInterval = setInterval(() => {
+      try {
+        publish("/app/lobby/users", {
+          type: "REQUEST",
+          content: "get_users",
+          timestamp: Date.now()
+        });
+        console.log("정기 접속자 목록 요청 전송");
+      } catch (error) {
+        console.error("정기 접속자 목록 요청 실패:", error);
+      }
+    }, 5000);
+    
+    return () => clearInterval(requestInterval);
+  }, [isConnected]);
   
   // 사용자 ID에 따라 일관된 색상 반환
   const getColorForUser = (userId: string | number): string => {
