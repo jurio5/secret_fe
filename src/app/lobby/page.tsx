@@ -68,6 +68,7 @@ function LobbyContent() {
   const [newNickname, setNewNickname] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [toast, setToast] = useState<ToastProps | null>(null);
+  const [isChangingNickname, setIsChangingNickname] = useState<boolean>(false);
 
   // 세션 무효화 오류 확인 함수
   const checkSessionError = (error: any): boolean => {
@@ -243,6 +244,20 @@ function LobbyContent() {
       return;
     }
     
+    // REGISTER 상태가 아니고 GUEST도 아니고 포인트가 부족한 경우 체크
+    if (currentUser?.status !== "REGISTER" && 
+        !(currentUser?.nickname && currentUser.nickname.startsWith("GUEST")) && 
+        (userProfileCache[currentUser?.id || 0]?.point || 0) < 100) {
+      alert("포인트가 부족합니다. 퀴즈를 풀어 포인트를 모아보세요!");
+      return;
+    }
+    
+    // 현재 닉네임과 동일한 경우 (REGISTER 상태가 아닐 때만 체크)
+    if (currentUser?.status !== "REGISTER" && newNickname === currentUser?.nickname) {
+      alert("현재 닉네임과 동일합니다. 다른 닉네임을 입력해주세요.");
+      return;
+    }
+    
     // 사용자 정보가 없는 경우 다시 가져오기 시도
     if (!currentUser || !currentUser.id) {
       try {
@@ -310,6 +325,9 @@ function LobbyContent() {
       return;
     }
     
+    // 닉네임 변경 진행 상태 설정
+    setIsChangingNickname(true);
+    
     try {
       const response = await client.PATCH("/api/v1/members/{memberId}/nickname", {
         params: {
@@ -357,41 +375,44 @@ function LobbyContent() {
           )
         );
         
-        // 웹소켓 연결을 완전히 재설정
-        console.log("닉네임 변경 후 웹소켓 연결 재설정");
-        
-        // 웹소켓 연결 완전 재설정
-        const success = reconnectWebSocket();
-        
-        if (success) {
-          // 재연결 성공 시 약간의 지연 후 구독 재설정
-          setTimeout(() => {
-            // 룸 업데이트 구독
-            subscribe("/topic/lobby", (_) => {
-              loadRooms();
-            });
-            
-            // 로비 접속자 목록 구독
-            subscribe("/topic/lobby/users", async (data: User[]) => {
-              // 아바타 정보 추가
-              const usersWithAvatars = await fetchUserAvatars(data);
-              setActiveUsers(usersWithAvatars);
-              setIsConnected(true);
+        // REGISTER 상태가 아닐 때만 웹소켓 재연결 로직 실행
+        if (currentUser.status !== "REGISTER") {
+          // 웹소켓 연결을 완전히 재설정
+          console.log("닉네임 변경 후 웹소켓 연결 재설정");
+          
+          // 웹소켓 연결 완전 재설정
+          const success = reconnectWebSocket();
+          
+          if (success) {
+            // 재연결 성공 시 약간의 지연 후 구독 재설정
+            setTimeout(() => {
+              // 룸 업데이트 구독
+              subscribe("/topic/lobby", (_) => {
+                loadRooms();
+              });
               
-              // 현재 로그인한 사용자의 정보도 업데이트
-              if (currentUser) {
-                const updatedCurrentUser = usersWithAvatars.find(user => user.id === currentUser.id);
-                if (updatedCurrentUser) {
-                  setCurrentUser(updatedCurrentUser);
+              // 로비 접속자 목록 구독
+              subscribe("/topic/lobby/users", async (data: User[]) => {
+                // 아바타 정보 추가
+                const usersWithAvatars = await fetchUserAvatars(data);
+                setActiveUsers(usersWithAvatars);
+                setIsConnected(true);
+                
+                // 현재 로그인한 사용자의 정보도 업데이트
+                if (currentUser) {
+                  const updatedCurrentUser = usersWithAvatars.find(user => user.id === currentUser.id);
+                  if (updatedCurrentUser) {
+                    setCurrentUser(updatedCurrentUser);
+                  }
                 }
-              }
-            });
-            
-            // 접속자 목록 요청
-            publish("/app/lobby/users", JSON.stringify({ action: "getUsers" }));
-          }, 1000); // 1초 후 재구독
-        } else {
-          console.error("웹소켓 재연결 실패");
+              });
+              
+              // 접속자 목록 요청
+              publish("/app/lobby/users", JSON.stringify({ action: "getUsers" }));
+            }, 1000); // 1초 후 재구독
+          } else {
+            console.error("웹소켓 재연결 실패");
+          }
         }
       }
       
@@ -411,6 +432,9 @@ function LobbyContent() {
       }
       
       alert("닉네임 변경에 실패했습니다.");
+    } finally {
+      // 닉네임 변경 진행 상태 해제
+      setIsChangingNickname(false);
     }
   };
 
@@ -491,6 +515,22 @@ function LobbyContent() {
       }
     };
   }, []);
+
+  // ESC 키로 닉네임 모달 닫기 이벤트 리스너
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showNicknameModal && 
+         (currentUser?.status !== "REGISTER" || (currentUser?.nickname && currentUser.nickname.startsWith("GUEST")))) {
+        setShowNicknameModal(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showNicknameModal, currentUser?.status, currentUser?.nickname]);
 
   const handleUserClick = async (user: User) => {
     // 클릭한 사용자가 현재 사용자와 동일한 경우, 로컬 상태에서 최신 정보 사용
@@ -665,7 +705,9 @@ function LobbyContent() {
                 activeUsers.map((user) => (
                   <div 
                     key={user.id} 
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-700/60 cursor-pointer transition-colors duration-200"
+                    className={`flex items-center gap-3 p-2 rounded-lg hover:bg-gray-700/60 cursor-pointer transition-colors duration-200 ${
+                      currentUser && user.id === currentUser.id ? 'bg-gray-700/40 border border-blue-500/30' : ''
+                    }`}
                     onClick={() => handleUserClick(user)}
                   >
                     <div className="w-8 h-8 rounded-full border border-gray-700 overflow-hidden">
@@ -688,7 +730,12 @@ function LobbyContent() {
                       )}
                     </div>
                     <div>
-                      <div className="text-sm text-white font-medium">{user.nickname}</div>
+                      <div className="text-sm text-white font-medium">
+                        {user.nickname}
+                        {currentUser && user.id === currentUser.id && (
+                          <span className="ml-1 px-1.5 py-0.5 bg-blue-900/30 text-blue-400 text-xs rounded-md">나</span>
+                        )}
+                      </div>
                       <div className="text-xs text-gray-400">{user.status}</div>
                     </div>
                   </div>
@@ -706,11 +753,78 @@ function LobbyContent() {
       {/* 닉네임 변경 모달 */}
       {showNicknameModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-800/80 border border-gray-700 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-xl font-bold text-white mb-4">닉네임 설정</h3>
-            <p className="text-gray-300 mb-4">
-              퀴즐에 오신 것을 환영합니다! 서비스를 이용하기 위해 닉네임을 설정해주세요.
-            </p>
+          <div className="bg-gray-800/80 border border-gray-700 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6 relative">
+            {/* X 버튼 (REGISTER 상태가 아닐 때만 활성화) */}
+            <button 
+              onClick={() => {
+                if (currentUser?.status !== "REGISTER" || (currentUser?.nickname && currentUser.nickname.startsWith("GUEST"))) {
+                  setShowNicknameModal(false);
+                }
+              }}
+              disabled={currentUser?.status === "REGISTER" && !(currentUser?.nickname && currentUser.nickname.startsWith("GUEST"))}
+              className={`absolute top-4 right-4 p-1.5 rounded-full ${
+                currentUser?.status === "REGISTER" && !(currentUser?.nickname && currentUser.nickname.startsWith("GUEST"))
+                  ? "text-gray-500 cursor-not-allowed" 
+                  : "bg-gray-700 hover:bg-gray-600 text-white"
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            
+            <h3 className="text-xl font-bold text-white mb-4">
+              {currentUser?.status === "REGISTER" ? "닉네임 설정" : "닉네임 변경"}
+            </h3>
+            
+            {currentUser?.status === "REGISTER" && (
+              <div className="mb-3 p-2 bg-blue-900/20 text-blue-400 text-sm rounded-lg border border-blue-800/30">
+                첫 로그인 시에는 닉네임 설정이 필수입니다.
+              </div>
+            )}
+            
+            {currentUser?.status === "REGISTER" ? (
+              <p className="text-gray-300 mb-4">
+                퀴즐에 오신 것을 환영합니다! 서비스를 이용하기 위해 닉네임을 설정해주세요.
+              </p>
+            ) : currentUser?.nickname && currentUser.nickname.startsWith("GUEST") ? (
+              <div className="text-gray-300 mb-4">
+                <p>새로운 닉네임을 입력해주세요.</p>
+                <p className="mt-1">GUEST 닉네임은 1회 무료로 변경 가능합니다.</p>
+                
+                <div className="mt-3 p-3 bg-blue-900/20 rounded-lg border border-blue-700/30">
+                  <p className="text-blue-400 text-sm">
+                    <span className="font-medium">✨ 특별 혜택:</span> GUEST 사용자는 닉네임을 1회 무료로 변경할 수 있습니다. 원하는 닉네임으로 지금 변경해보세요!
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="text-gray-300 mb-4">
+                <p>새로운 닉네임을 입력해주세요.</p>
+                <p className="mt-1">닉네임 변경 시 포인트가 차감될 수 있습니다.</p>
+                
+                <div className="mt-3 p-3 bg-gray-900/50 rounded-lg border border-gray-700">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-400">현재 포인트:</span>
+                    <span className="text-green-400 font-semibold">{userProfileCache[currentUser?.id || 0]?.point || 0} P</span>
+                  </div>
+                  <div className="flex justify-between items-center mt-1">
+                    <span className="text-sm text-gray-400">차감 포인트:</span>
+                    <span className="text-red-400 font-semibold">100 P</span>
+                  </div>
+                  <div className="flex justify-between items-center mt-1">
+                    <span className="text-sm text-gray-400">변경 후 포인트:</span>
+                    <span className="text-blue-400 font-semibold">{Math.max(0, (userProfileCache[currentUser?.id || 0]?.point || 0) - 100)} P</span>
+                  </div>
+                  
+                  {(userProfileCache[currentUser?.id || 0]?.point || 0) < 100 && (
+                    <div className="mt-2 text-xs text-red-400 bg-red-900/20 p-2 rounded border border-red-900/30">
+                      포인트가 부족합니다. 퀴즈를 풀어 포인트를 모아보세요!
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             
             <div className="mb-4">
               <input
@@ -720,16 +834,44 @@ function LobbyContent() {
                 value={newNickname}
                 onChange={(e) => setNewNickname(e.target.value)}
                 maxLength={10}
+                disabled={isChangingNickname}
               />
               <p className="text-xs text-gray-400 mt-1">최대 10자까지 입력 가능합니다.</p>
             </div>
             
-            <button
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-4 py-2 rounded-lg font-medium"
-              onClick={handleChangeNickname}
-            >
-              닉네임 저장
-            </button>
+            <div className={currentUser?.status === "REGISTER" && !(currentUser?.nickname && currentUser.nickname.startsWith("GUEST")) ? "" : "flex gap-2"}>
+              {(currentUser?.status !== "REGISTER" || (currentUser?.nickname && currentUser.nickname.startsWith("GUEST"))) && (
+                <button
+                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium"
+                  onClick={() => setShowNicknameModal(false)}
+                  disabled={isChangingNickname}
+                >
+                  취소
+                </button>
+              )}
+              
+              <button
+                className={`${currentUser?.status === "REGISTER" && !(currentUser?.nickname && currentUser.nickname.startsWith("GUEST")) ? "w-full" : "flex-1"} ${
+                  currentUser?.status === "REGISTER" || (currentUser?.nickname && currentUser.nickname.startsWith("GUEST")) || (userProfileCache[currentUser?.id || 0]?.point || 0) >= 100
+                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+                    : "bg-gray-600 cursor-not-allowed"
+                } text-white px-4 py-2 rounded-lg font-medium relative`}
+                onClick={handleChangeNickname}
+                disabled={(currentUser?.status !== "REGISTER" && !(currentUser?.nickname && currentUser.nickname.startsWith("GUEST")) && (userProfileCache[currentUser?.id || 0]?.point || 0) < 100) || isChangingNickname}
+              >
+                {isChangingNickname ? (
+                  <span className="flex items-center justify-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    처리 중...
+                  </span>
+                ) : (
+                  currentUser?.status === "REGISTER" ? "닉네임 저장" : "닉네임 변경"
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -784,10 +926,26 @@ function LobbyContent() {
                 {selectedUser.loading ? (
                   <div className="h-6 w-16 bg-gray-700 rounded animate-pulse"></div>
                 ) : (
-                  <div className="flex items-center text-blue-400 text-sm">
-                    <span className="bg-blue-900/30 rounded-md px-2 py-0.5 border border-blue-800/50">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-blue-900/30 rounded-md px-2 py-0.5 border border-blue-800/50 text-blue-400 text-sm">
                       Lv. {selectedUser.level || 1}
                     </span>
+                    
+                    {/* 자신의 프로필인 경우 닉네임 변경 버튼 표시 */}
+                    {currentUser && selectedUser.id === currentUser.id && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation(); // 이벤트 버블링 방지
+                          closeProfileModal();
+                          // 닉네임 모달 표시 전 기본값 설정
+                          setNewNickname(currentUser.nickname);
+                          setShowNicknameModal(true);
+                        }}
+                        className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-0.5 rounded transition-colors"
+                      >
+                        닉네임 변경
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -859,7 +1017,7 @@ function LobbyContent() {
 
 export default function LobbyPage() {
   return (
-    <AppLayout showBeforeUnloadWarning={true}>
+    <AppLayout showBeforeUnloadWarning={true} showHomeButton={false}>
       <Suspense
         fallback={
           <div className="flex justify-center items-center min-h-[60vh]">
