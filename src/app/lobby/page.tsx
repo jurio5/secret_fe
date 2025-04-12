@@ -8,6 +8,7 @@ import { subscribe, unsubscribe, publish, reconnectWebSocket } from "@/lib/backe
 import Toast, { ToastProps } from "@/components/common/Toast";
 import { FaTrophy, FaUserFriends, FaUser, FaComments } from "react-icons/fa";
 import { useRouter } from "next/navigation";
+import FriendModal from '@/components/friend/FriendModal';
 
 interface User {
   id: number;
@@ -85,6 +86,7 @@ function LobbyContent() {
   const [showRankingModal, setShowRankingModal] = useState<boolean>(false);
   const [rankings, setRankings] = useState<MemberRanking[]>([]);
   const [isLoadingRankings, setIsLoadingRankings] = useState<boolean>(false);
+  const [showFriendModal, setShowFriendModal] = useState<boolean>(false);
   
   // 세션 로딩 재시도 횟수 관리
   const userLoadRetryCountRef = useRef<number>(0);
@@ -1067,6 +1069,11 @@ function LobbyContent() {
     setShowRankingModal(false);
   };
 
+  // 친구 모달 토글 함수
+  const toggleFriendModal = () => {
+    setShowFriendModal(!showFriendModal);
+  };
+
   return (
     <div className="container mx-auto px-4 py-8 flex flex-col h-full">
       {/* 토스트 메시지 표시 */}
@@ -1091,7 +1098,7 @@ function LobbyContent() {
             {/* 중앙 네비게이션 버튼들 */}
             <div className="flex items-center space-x-1">
               <button 
-                onClick={() => alert("친구 목록 기능은 준비 중입니다.")}
+                onClick={toggleFriendModal}
                 className="group relative px-4 py-2 rounded-lg hover:bg-gray-700/50 transition-all"
               >
                 <div className="flex flex-col items-center">
@@ -1100,7 +1107,7 @@ function LobbyContent() {
                   </svg>
                   <span className="text-xs text-gray-300 group-hover:text-white mt-1">친구</span>
                 </div>
-                <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-1/2 h-0.5 bg-blue-500 opacity-0 group-hover:opacity-100 transition-all"></div>
+                <div className={`absolute bottom-0 left-1/2 transform -translate-x-1/2 w-1/2 h-0.5 bg-blue-500 ${showFriendModal ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-all`}></div>
               </button>
               
               <button className="group relative px-4 py-2 rounded-lg hover:bg-gray-700/50 transition-all">
@@ -1831,6 +1838,11 @@ function LobbyContent() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 친구 모달 */}
+      {showFriendModal && (
+        <FriendModal isOpen={showFriendModal} onClose={() => setShowFriendModal(false)} />
       )}
     </div>
   );
