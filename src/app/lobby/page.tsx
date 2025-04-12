@@ -177,15 +177,84 @@ function LobbyContent() {
       const now = new Date();
       const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       
-      // 서버에서 받은 메시지 형식에 따라 처리
+      // 서버에서 오는 WebSocketChatMessageResponse 형식 처리
+      // WebSocketChatMessageResponse[type=CHAT, content={...}, senderId=... 형식
+      if (typeof message === 'object' && message.content) {
+        console.log("메시지 처리 시작:", message);
+        
+        let messageContent = "";
+        let sender = "";
+        let messageType = "CHAT";
+        let clientId: number | null = null;
+        
+        // content가 JSON 문자열인 경우 (중첩된 형식)
+        if (typeof message.content === 'string' && message.content.startsWith('{')) {
+          try {
+            const innerMessage = JSON.parse(message.content);
+            console.log("내부 메시지 파싱:", innerMessage);
+            
+            messageContent = innerMessage.content || "";
+            
+            // 수신된 메시지의 발신자가 "나"인 경우 senderName을 사용 (다른 사용자 표시)
+            if (innerMessage.sender === "나" && message.senderName) {
+              sender = message.senderName;
+            } else {
+              sender = innerMessage.sender || message.senderName || "알 수 없음";
+            }
+            
+            messageType = innerMessage.type || "CHAT";
+            clientId = innerMessage.clientMessageId;
+            
+            // 자신이 보낸 메시지 여부 확인 (로그용)
+            const isMyMessage = clientId && chatMessages.some(msg => msg.id === clientId);
+            console.log("메시지 정보:", {
+              내용: messageContent,
+              발신자: sender,
+              타입: messageType,
+              클라이언트ID: clientId,
+              자신의메시지: isMyMessage
+            });
+            
+            // 이미 표시된 메시지는 건너뛰기 (clientId로 식별)
+            if (clientId && chatMessages.some(msg => msg.id === clientId)) {
+              console.log("이미 표시된 메시지 무시:", clientId);
+              return;
+            }
+          } catch (e) {
+            console.error("내부 메시지 파싱 실패:", e);
+            // 파싱 실패 시 원본 메시지 사용
+            messageContent = message.content;
+            sender = message.senderName || message.senderId || "알 수 없음";
+          }
+        } else {
+          // 일반 형식
+          messageContent = message.content;
+          sender = message.senderName || message.senderId || "알 수 없음";
+        }
+        
+        // 메시지 추가
+        addChatMessage({
+          id: clientId || Date.now(),
+          sender: sender,
+          message: messageContent,
+          timestamp: message.timestamp ? 
+            new Date(parseInt(message.timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 
+            timeString,
+          type: messageType
+        });
+        return;
+      }
+      
+      // 문자열 메시지 처리
       if (typeof message === 'string') {
         try {
           const parsedMessage = JSON.parse(message);
-          console.log("파싱된 문자열 메시지:", parsedMessage);
-          addChatMessage(parsedMessage);
+          console.log("문자열 메시지 파싱:", parsedMessage);
+          // 파싱된 메시지를 다시 처리
+          handleChatMessage(parsedMessage);
         } catch (e) {
           // 단순 문자열인 경우
-          console.log("문자열 메시지 처리:", message);
+          console.log("단순 문자열 메시지:", message);
           addChatMessage({
             id: Date.now(),
             sender: "시스템",
@@ -194,68 +263,21 @@ function LobbyContent() {
             type: "SYSTEM"
           });
         }
-      } else {
-        // 이미 객체인 경우
-        console.log("객체 메시지 처리:", message);
-        
-        // 중첩된 JSON 구조 처리
-        let messageContent = "";
-        let sender = "";
-        let messageType = "CHAT";
-        let clientMessageId: number | null = null;
-        
-        // content 필드에 JSON 문자열이 있는 경우 (서버 로그에서 확인된 중첩 구조)
-        if (message.content && typeof message.content === 'string' && message.content.includes('"type"')) {
-          try {
-            const innerMessage = JSON.parse(message.content);
-            console.log("내부 메시지 파싱:", innerMessage);
-            messageContent = innerMessage.content || "";
-            sender = innerMessage.sender || "";
-            messageType = innerMessage.type || "CHAT";
-            clientMessageId = innerMessage.clientMessageId;
-            
-            // 사용자 정보가 포함된 모든 채팅 메시지를 표시하고 로깅
-            console.log("메시지 발신자 정보:", {
-              내부발신자: sender,
-              외부발신자ID: message.senderId,
-              외부발신자이름: message.senderName,
-              클라이언트메시지ID: clientMessageId
-            });
-            
-            // 서버에서 온 발신자 이름으로 대체
-            if (message.senderName) {
-              sender = message.senderName;
-            }
-
-            // 클라이언트 ID로 자신이 보낸 메시지인지 확인 (이미 추가된 경우 무시)
-            if (clientMessageId) {
-              // 이미 메시지 목록에 있는지 확인
-              const isDuplicate = chatMessages.some(msg => msg.id === clientMessageId);
-              if (isDuplicate) {
-                console.log("이미 표시된 메시지 무시 (ID 기반):", clientMessageId);
-                return;
-              }
-            }
-          } catch (e) {
-            console.error("중첩된 메시지 파싱 실패:", e);
-            messageContent = message.content;
-            sender = message.senderName || message.senderId || "알 수 없음";
-          }
-        } else {
-          // 기존 로직 유지
-          messageContent = message.content || message.message || message.text || message.body || JSON.stringify(message);
-          sender = message.sender || message.user || message.username || message.senderName || "알 수 없음";
-          messageType = message.type || "CHAT";
-        }
-        
-        addChatMessage({
-          id: clientMessageId || Date.now(),
-          sender: sender,
-          message: messageContent,
-          timestamp: message.timestamp ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : timeString,
-          type: messageType
-        });
+        return;
       }
+      
+      // 위 조건에 해당하지 않는 객체인 경우
+      console.log("기타 메시지 형식:", message);
+      addChatMessage({
+        id: Date.now(),
+        sender: message.sender || message.senderName || "알 수 없음",
+        message: message.content || message.message || message.text || JSON.stringify(message),
+        timestamp: message.timestamp ? 
+          new Date(parseInt(message.timestamp)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 
+          timeString,
+        type: message.type || "CHAT"
+      });
+      
     } catch (error) {
       console.error("채팅 메시지 처리 중 오류:", error);
     }
