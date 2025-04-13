@@ -23,6 +23,7 @@ const FriendSearch: React.FC<FriendSearchProps> = ({ onFriendRequestSent }) => {
     
     try {
       const results = await searchUserByNickname(searchQuery);
+      console.log('검색 결과와 친구 상태:', results);
       setSearchResults(results);
     } catch (error) {
       console.error('사용자 검색 중 오류 발생:', error);
@@ -126,7 +127,11 @@ const FriendSearch: React.FC<FriendSearchProps> = ({ onFriendRequestSent }) => {
                       <div className="font-medium text-white">{user.nickname}</div>
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-center text-white">레벨 {user.level}</td>
+                  <td className="py-3 px-4 text-center">
+                    <span className="font-medium text-blue-300 bg-blue-900/30 px-2.5 py-1 rounded-lg border border-blue-500/20">
+                      Lv.{user.level}
+                    </span>
+                  </td>
                   <td className="py-3 px-4 text-right">
                     {user.status === 'FRIEND' ? (
                       <span className="px-3 py-1.5 text-sm font-medium rounded-md bg-green-900/20 text-green-400">
