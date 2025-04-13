@@ -212,74 +212,48 @@ export default function RoomPage() {
                     // 방 정보 업데이트
                     setRoom(roomData);
                     
-                    // 플레이어 목록 수동 조회 (roomData에 players 필드가 있는 경우)
-                    if (roomData.players && Array.isArray(roomData.players) && roomData.players.length > 0) {
-                      debug("플레이어 목록 발견:", roomData.players);
+                    // players 필드가 있으면 사용 (빈 배열이어도 그대로 사용)
+                    const playersData = roomData.players || [];
+                    debug("플레이어 목록:", playersData);
+                    
+                    // 빈 배열이어도 처리 (플레이어가 없는 상태)
+                    const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
+                      // ID가 숫자면 문자열로 변환
+                      const id = typeof player.id === 'number' ? String(player.id) : player.id;
                       
-                      // 플레이어 데이터 형식 통일화
-                      const formattedPlayers: PlayerProfile[] = roomData.players.map((player: any) => {
-                        // ID가 숫자면 문자열로 변환
-                        const id = typeof player.id === 'number' ? String(player.id) : player.id;
-                        
-                        // 방장 여부 확인 - boolean 타입으로 명시적 변환
-                        const isPlayerOwner = Boolean(player.isOwner === true || 
-                          (roomData.ownerId && id === roomData.ownerId.toString()));
-                        
-                        return {
-                          id,
-                          nickname: player.nickname || player.name || '사용자',
-                          profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
-                          isOwner: isPlayerOwner,
-                          ready: Boolean(player.ready || player.isReady),
-                          status: player.status || "WAITING",
-                          score: player.score || 0
-                        };
-                      });
+                      // 방장 여부 확인 - boolean 타입으로 명시적 변환
+                      const isPlayerOwner = Boolean(player.isOwner === true || 
+                        (roomData.ownerId && id === roomData.ownerId.toString()));
                       
-                      setPlayers(formattedPlayers);
-                      debug("플레이어 목록 수동 업데이트 완료", formattedPlayers);
-                    } else {
-                      // 플레이어 목록을 별도로 조회
-                      try {
-                        debug("플레이어 목록 별도 조회");
-                        const playersResponse = await (client.GET as any)(`/api/v1/rooms/${roomId}/players`, {}) as ApiResponse<any[]>;
-                        
-                        if (playersResponse.error) {
-                          console.error("플레이어 목록 조회 실패:", playersResponse.error);
-                          return;
-                        }
-                        
-                        if (playersResponse.data?.data) {
-                          const playersData = playersResponse.data.data;
-                          debug("플레이어 목록 조회 성공:", playersData);
-                          
-                          // 플레이어 데이터 형식 통일화
-                          const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
-                            // ID가 숫자면 문자열로 변환
-                            const id = typeof player.id === 'number' ? String(player.id) : player.id;
-                            
-                            // 방장 여부 확인 - boolean 타입으로 명시적 변환
-                            const isPlayerOwner = Boolean(player.isOwner === true || 
-                              (roomData.ownerId && id === roomData.ownerId.toString()));
-                            
-                            return {
-                              id,
-                              nickname: player.nickname || player.name || '사용자',
-                              profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
-                              isOwner: isPlayerOwner,
-                              ready: Boolean(player.ready || player.isReady),
-                              status: player.status || "WAITING",
-                              score: player.score || 0
-                            };
-                          });
-                          
-                          setPlayers(formattedPlayers);
-                          debug("플레이어 목록 수동 업데이트 완료", formattedPlayers);
-                        }
-                      } catch (error) {
-                        console.error("플레이어 목록 조회 중 오류:", error);
-                      }
+                      return {
+                        id,
+                        nickname: player.nickname || player.name || '사용자',
+                        profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
+                        isOwner: isPlayerOwner,
+                        ready: Boolean(player.ready || player.isReady),
+                        status: player.status || "WAITING",
+                        score: player.score || 0
+                      };
+                    });
+                    
+                    // 현재 유저가 목록에 없고 방에 입장 중인 경우 자신을 추가
+                    if (formattedPlayers.length === 0 && currentUserId) {
+                      const isCurrentUserOwner = isUserRoomOwner(roomData, currentUserId);
+                      const selfPlayer: PlayerProfile = {
+                        id: currentUserId.toString(),
+                        nickname: currentUser?.nickname || "사용자",
+                        profileImage: currentUser?.profileImage || DEFAULT_PROFILE_IMAGE,
+                        isOwner: isCurrentUserOwner,
+                        ready: isReady,
+                        status: "WAITING",
+                        score: 0
+                      };
+                      formattedPlayers.push(selfPlayer);
+                      debug("플레이어 목록이 비어있어 자신을 추가", selfPlayer);
                     }
+                    
+                    setPlayers(formattedPlayers);
+                    debug("플레이어 목록 업데이트 완료", formattedPlayers);
                     
                     // 방장 여부 업데이트
                     if (roomData.ownerId && currentUserId) {
