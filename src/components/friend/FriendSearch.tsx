@@ -22,6 +22,9 @@ const FriendSearch: React.FC<FriendSearchProps> = ({ onFriendRequestSent }) => {
     setHasSearched(true);
     
     try {
+      // 현재 로그인한 사용자 정보 로깅
+      console.log('현재 로그인한 사용자 정보:', (window as any).__INITIAL_USER__);
+      
       const results = await searchUserByNickname(searchQuery);
       console.log('검색 결과와 친구 상태:', results);
       setSearchResults(results);
