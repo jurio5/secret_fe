@@ -1121,6 +1121,14 @@ function LobbyContent({
       return;
     }
     
+    // 방 생성 메시지인 경우
+    if (message.type === "ROOM_CREATED") {
+      console.log("방 생성 알림 수신:", message);
+      // 방 목록 새로고침
+      loadRooms();
+      return;
+    }
+    
     // 사용자 상태 메시지인 경우
     if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || message.type === "STATUS_UPDATE") {
       // 사용자 목록 갱신
@@ -1155,6 +1163,9 @@ function LobbyContent({
   // WebSocket 초기화에 로비 상태 메시지 구독 추가
   const initializeWebSocket = async () => {
     try {
+      // 룸 업데이트 구독
+      subscribe("/topic/lobby", receiveMessage);
+      
       // 로비 채팅 메시지 구독 - 이제 모든 메시지 타입이 receiveMessage에서 구분되어 처리됨
       subscribe("/topic/lobby/chat", receiveMessage);
       
