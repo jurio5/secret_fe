@@ -126,7 +126,7 @@ const FriendSearch: React.FC<FriendSearchProps> = ({ onFriendRequestSent }) => {
                       <div className="font-medium text-white">{user.nickname}</div>
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-center">{user.level}</td>
+                  <td className="py-3 px-4 text-center text-white">레벨 {user.level}</td>
                   <td className="py-3 px-4 text-right">
                     {user.status === 'FRIEND' ? (
                       <span className="px-3 py-1.5 text-sm font-medium rounded-md bg-green-900/20 text-green-400">
