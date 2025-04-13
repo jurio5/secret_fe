@@ -398,25 +398,64 @@ export default function RoomPage() {
             return;
           }
           
-          // 2. status.players에 한 명만 있는데 room.players에 여러 명이 있으면 불완전한 목록으로 간주
-          const isIncompleteList = status.room && 
-            Array.isArray(status.room.players) && 
-            status.room.players.length > status.players.length;
+          // room.players ID 목록과 status.players 객체 배열을 비교하여 완전성 확인
+          const roomPlayerIds = status.room?.players || [];
+          console.log("Room player IDs:", roomPlayerIds);
+          console.log("Status players:", status.players);
+          
+          // room.players에 있지만 status.players에 없는 ID 확인
+          const missingPlayerIds = roomPlayerIds.filter((id: number) => 
+            !status.players.some((p: any) => String(p.id) === String(id))
+          );
+          
+          if (missingPlayerIds.length > 0) {
+            console.log("누락된 플레이어 ID 감지:", missingPlayerIds);
             
-          if (isIncompleteList) {
-            console.log("불완전한 플레이어 목록 감지됨. 기존 목록 유지");
-            
-            // 플레이어 정보 업데이트만 적용 (새 플레이어 추가나 목록 교체는 안 함)
+            // 기존 플레이어 목록에서 해당 ID의 플레이어 정보 보존
             setPlayers(prevPlayers => {
-              return prevPlayers.map(player => {
-                // 현재 수신된 목록에서 매칭되는 플레이어 찾기 - id가 정확히 일치하는 경우만 업데이트
-                const updatedPlayer = status.players.find((p: any) => 
-                  String(p.id) === String(player.id)
-                );
-                
-                // 업데이트된 정보가 있으면 병합, 없으면 기존 정보 유지
-                return updatedPlayer ? { ...player, ...updatedPlayer } : player;
+              // 수신된 플레이어 정보 형식 통일
+              const formattedReceived = status.players.map((player: any) => ({
+                id: String(player.id),
+                name: player.name || player.nickname || '사용자',
+                nickname: player.nickname || player.name || '사용자',
+                isOwner: Boolean(player.isOwner),
+                isReady: Boolean(player.isReady),
+                avatarUrl: player.avatarUrl || DEFAULT_AVATAR,
+                sessionId: player.sessionId || `session-${Date.now()}`
+              }));
+              
+              // 기존 플레이어 중 누락된 ID 해당 플레이어 정보 유지
+              const preservedPlayers = prevPlayers.filter(player => 
+                missingPlayerIds.includes(Number(player.id))
+              );
+              
+              // 두 배열 병합 (중복 없이)
+              const mergedPlayers = [...formattedReceived];
+              
+              preservedPlayers.forEach(player => {
+                if (!mergedPlayers.some(p => String(p.id) === String(player.id))) {
+                  mergedPlayers.push(player);
+                }
               });
+              
+              // 방장 속성 정확히 설정
+              if (status.room?.ownerId) {
+                mergedPlayers.forEach(player => {
+                  player.isOwner = String(player.id) === String(status.room.ownerId);
+                });
+              }
+              
+              // 현재 사용자가 목록에 없으면 추가
+              if (currentUser && !mergedPlayers.some(p => String(p.id) === String(currentUser.id))) {
+                const currentUserInfo = prevPlayers.find(p => String(p.id) === String(currentUser.id));
+                if (currentUserInfo) {
+                  mergedPlayers.push(currentUserInfo);
+                  console.log("현재 사용자 정보 목록에 추가");
+                }
+              }
+              
+              console.log("병합된 최종 플레이어 목록:", mergedPlayers);
+              return mergedPlayers;
             });
           } else {
             // 완전한 플레이어 목록인 경우 교체
@@ -427,7 +466,7 @@ export default function RoomPage() {
               id: String(player.id),
               name: player.name || player.nickname || '사용자',
               nickname: player.nickname || player.name || '사용자',
-              isOwner: Boolean(player.isOwner),
+              isOwner: status.room?.ownerId ? String(player.id) === String(status.room.ownerId) : Boolean(player.isOwner),
               isReady: Boolean(player.isReady),
               avatarUrl: player.avatarUrl || DEFAULT_AVATAR,
               sessionId: player.sessionId || `session-${Date.now()}`
