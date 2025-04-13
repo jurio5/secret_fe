@@ -1148,6 +1148,39 @@ function LobbyContent({
       return;
     }
     
+    // 방 업데이트 메시지인 경우 (방장 변경, 인원수 변경 등)
+    if (message === "ROOM_UPDATED" || message.startsWith && message.startsWith("ROOM_UPDATED:")) {
+      console.log("방 업데이트 알림 수신:", message);
+      // 방 ID 추출 시도
+      const roomId = message.startsWith && message.startsWith("ROOM_UPDATED:") 
+        ? message.split(":")[1] 
+        : null;
+      
+      if (roomId) {
+        // 특정 방 정보만 업데이트 위해 API 호출
+        try {
+          fetch(`/api/v1/rooms/${roomId}`)
+            .then(res => res.json())
+            .then(data => {
+              if (data && data.data) {
+                const updatedRoom = data.data;
+                setRooms(prevRooms => prevRooms.map(room => 
+                  room.id === parseInt(roomId) ? { ...room, ...updatedRoom } : room
+                ));
+                console.log(`방 ID ${roomId} 정보 업데이트됨`, updatedRoom);
+              }
+            })
+            .catch(err => console.error("방 정보 업데이트 실패:", err));
+        } catch (error) {
+          console.error("방 정보 업데이트 요청 실패:", error);
+        }
+      } else {
+        // 전체 방 목록 새로고침
+        loadRooms();
+      }
+      return;
+    }
+    
     // 사용자 상태 메시지인 경우
     if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || message.type === "STATUS_UPDATE") {
       // 사용자 목록 갱신
