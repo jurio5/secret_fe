@@ -850,38 +850,25 @@ function LobbyContent({
 
   // 채팅 구독 설정
   useEffect(() => {
-    // 로컬 스토리지에서 이전 채팅 메시지 불러오기
-    try {
-      const savedMessages = localStorage.getItem('lobby_chat_messages');
-      if (savedMessages) {
-        const parsedMessages = JSON.parse(savedMessages);
-        setChatMessages(parsedMessages);
-      } else {
-        // 저장된 메시지가 없는 경우 기본 시스템 메시지 설정
-        setChatMessages([{
-          type: "SYSTEM",
-          content: "로비 채팅에 연결되었습니다. 안녕하세요! 👋",
-          senderId: "system",
-          senderName: "System",
-          timestamp: Date.now(),
-          roomId: "lobby"
-        }]);
-      }
-    } catch (error) {
-      console.error('채팅 메시지 불러오기 실패:', error);
-      // 오류 발생 시 기본 시스템 메시지 설정
-      setChatMessages([{
-        type: "SYSTEM",
-        content: "로비 채팅에 연결되었습니다. 안녕하세요! 👋",
-        senderId: "system",
-        senderName: "System",
-        timestamp: Date.now(),
-        roomId: "lobby"
-      }]);
-    }
+    // 초기 시스템 메시지 설정
+    setChatMessages([{
+      type: "SYSTEM",
+      content: "로비 채팅에 연결되었습니다. 안녕하세요! 👋",
+      senderId: "system",
+      senderName: "System",
+      timestamp: Date.now(),
+      roomId: "lobby"
+    }]);
+    
+    // 여기서는 메시지를 불러오기만 하고 구독은 하지 않음
+  }, []); // 컴포넌트 마운트 시 한 번만 실행
+
+  // 웹소켓 연결 시 채팅 구독 설정
+  useEffect(() => {
+    if (!isConnected) return; // 웹소켓이 연결되어 있어야 구독 가능
     
     // 로비 채팅 구독
-    subscribe("/topic/lobby/chat", (message) => {
+    const handleChatMessage = (message: any) => {
       // 사용자 프로필 정보 확인 및 아바타 URL 가져오기
       let avatarUrl = undefined;
       
@@ -938,13 +925,6 @@ function LobbyContent({
                         : msg
                     );
                     
-                    // 로컬 스토리지에 업데이트된 메시지 저장
-                    try {
-                      localStorage.setItem('lobby_chat_messages', JSON.stringify(updatedMessages));
-                    } catch (error) {
-                      console.error('채팅 메시지 저장 실패:', error);
-                    }
-                    
                     return updatedMessages;
                   });
                 }
@@ -975,21 +955,37 @@ function LobbyContent({
           ? newMessages.slice(newMessages.length - maxMessages) 
           : newMessages;
         
-        // 로컬 스토리지에 저장
-        try {
-          localStorage.setItem('lobby_chat_messages', JSON.stringify(trimmedMessages));
-        } catch (error) {
-          console.error('채팅 메시지 저장 실패:', error);
-        }
-        
         return trimmedMessages;
       });
-    });
+    };
+    
+    subscribe("/topic/lobby/chat", handleChatMessage);
     
     return () => {
       unsubscribe("/topic/lobby/chat");
     };
-  }, [activeUsers]);
+  }, [isConnected]); // 연결 상태가 변경될 때만 구독 갱신
+  
+  // 기존 사용자 프로필 아바타 URL 업데이트 useEffect는 유지
+  useEffect(() => {
+    // 사용자 목록이 변경될 때 아바타 정보만 업데이트
+    const updatedMessages = chatMessages.map(msg => {
+      if (msg.senderId && msg.senderId !== "system") {
+        const senderId = parseInt(msg.senderId);
+        const activeUser = activeUsers.find(user => user.id === senderId);
+        
+        if (activeUser && activeUser.avatarUrl && msg.avatarUrl !== activeUser.avatarUrl) {
+          return { ...msg, avatarUrl: activeUser.avatarUrl };
+        }
+      }
+      return msg;
+    });
+    
+    // 메시지가 변경된 경우만 업데이트
+    if (JSON.stringify(updatedMessages) !== JSON.stringify(chatMessages)) {
+      setChatMessages(updatedMessages);
+    }
+  }, [activeUsers, chatMessages]);
   
   // 새 메시지가 올 때마다 스크롤 이동
   useEffect(() => {
