@@ -135,38 +135,34 @@ const performSubscribe = (
 ) => {
   const subscription = stompClient.subscribe(destination, (message) => {
     try {
-      // JSON 파싱 시도
-      let parsedMessage;
-      try {
-        parsedMessage = JSON.parse(message.body);
-      } catch (jsonError) {
-        console.warn(`JSON 파싱 실패 (${destination}):`, jsonError);
-        console.debug("원본 메시지:", message.body);
-        
-        // Java 객체 문자열 파싱 시도
-        if (message.body.includes("WebSocketChatMessageResponse[")) {
-          const javaObject = parseJavaObjectString(message.body);
-          if (javaObject) {
-            console.debug("Java 객체 문자열 파싱 성공:", javaObject);
-            callback(javaObject);
-            return;
-          }
-        }
-        
-        // 특정 패턴 메시지 처리 (ROOM_CREATED 등)
-        if (destination === "/topic/lobby" && message.body.startsWith("ROOM_CREATED:")) {
-          const roomId = message.body.split(":")[1];
-          console.debug("방 생성 메시지 감지:", roomId);
-          callback({
-            type: "ROOM_CREATED",
-            roomId: parseInt(roomId),
-            timestamp: Date.now()
-          });
+      // 먼저 Java 객체 문자열인지 확인
+      if (message.body.includes("WebSocketChatMessageResponse[") || 
+          (destination === "/topic/lobby/chat" && message.body.includes("[type="))) {
+        const javaObject = parseJavaObjectString(message.body);
+        if (javaObject) {
+          console.debug("Java 객체 문자열 파싱 성공:", javaObject);
+          callback(javaObject);
           return;
         }
-        
-        // 채팅 메시지 관련 처리 (/topic/room/chat/ 등)
-        if (destination.includes('/chat/') || destination.includes('/room/chat/') || destination.includes('/game/chat/')) {
+      }
+      
+      // 특정 패턴 메시지 처리 (ROOM_CREATED 등)
+      if (destination === "/topic/lobby" && message.body.startsWith("ROOM_CREATED:")) {
+        const roomId = message.body.split(":")[1];
+        console.debug("방 생성 메시지 감지:", roomId);
+        callback({
+          type: "ROOM_CREATED",
+          roomId: parseInt(roomId),
+          timestamp: Date.now()
+        });
+        return;
+      }
+      
+      // 채팅 메시지 관련 처리 (/topic/room/chat/ 등)
+      if (destination.includes('/chat/') || destination.includes('/room/chat/') || 
+          destination.includes('/game/chat/') || destination === '/topic/lobby/chat') {
+        // 채팅 메시지인지 먼저 확인 (Java 객체 형식이 아닌 경우)
+        if (!message.body.includes("WebSocketChatMessageResponse[")) {
           console.log("🔰 채팅 메시지 감지:", {
             destination,
             rawMessage: message.body,
@@ -175,7 +171,7 @@ const performSubscribe = (
           
           let content = message.body;
           let type = "CHAT";
-          let roomId = destination.split('/').pop() || "unknown";
+          let roomId = destination.includes('/lobby/') ? "lobby" : destination.split('/').pop() || "unknown";
           
           // 메시지가 따옴표로 감싸진 경우 제거
           if (content.startsWith('"') && content.endsWith('"')) {
@@ -214,14 +210,18 @@ const performSubscribe = (
           });
           return;
         }
-        
-        // 기타 메시지는 원본 반환
-        callback(message.body);
-        return;
       }
       
-      // JSON 파싱 성공 케이스
-      callback(parsedMessage);
+      // 마지막으로 JSON 파싱 시도
+      try {
+        const parsedMessage = JSON.parse(message.body);
+        callback(parsedMessage);
+        return;
+      } catch (jsonError) {
+        // JSON으로 파싱 실패 시 오류 메시지를 로그에 출력하지 않음
+        // 기타 메시지는 원본 반환
+        callback(message.body);
+      }
     } catch (error) {
       console.error("메시지 파싱 실패:", error);
       console.debug("원본 메시지:", message.body);
