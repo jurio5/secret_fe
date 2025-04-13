@@ -224,16 +224,12 @@ export default function RoomPage() {
               return;
             }
             
-            // 플레이어 목록이 비어있을 경우, 현재 플레이어 목록이 있다면 유지
-            if (playersData.length === 0 && players.length > 0) {
-              console.log("서버에서 빈 플레이어 목록이 전송됨, 현재 목록 유지:", players);
-              return;
-            } 
-            
+            // JOIN, LEAVE 등의 메시지인 경우, 이 때 받은 플레이어 목록이 최신 상태임
+            // 이를 전체 목록으로 설정 (다른 채널의 변경 사항보다 우선함)
             if (playersData.length > 0) {
-              console.log(`서버에서 ${playersData.length}명의 플레이어 목록 수신`);
+              console.log(`서버에서 ${playersData.length}명의 완전한 플레이어 목록 수신`);
               
-              // 플레이어 데이터 형식 통일화 (일부는 ID가 숫자, 일부는 문자열일 수 있음)
+              // 플레이어 데이터 형식 통일화
               const formattedPlayers = playersData.map((player: any) => {
                 // ID가 숫자면 문자열로 변환
                 const id = typeof player.id === 'number' ? String(player.id) : player.id;
@@ -252,25 +248,41 @@ export default function RoomPage() {
                 };
               });
               
+              // 기존 플레이어 중 현재 사용자가 있는지 확인
+              const currentUserPlayer = currentUser ? players.find(p => p.id === currentUser.id.toString()) : null;
+              
+              // 새 목록에 현재 사용자가 없는 경우에만 추가
+              if (currentUser && currentUserPlayer && !formattedPlayers.some(p => p.id === currentUser.id.toString())) {
+                console.log("서버 플레이어 목록에 현재 사용자 추가:", currentUser.nickname);
+                formattedPlayers.push(currentUserPlayer);
+              }
+              
+              // 플레이어 목록 완전 교체 (이 메시지가 가장 신뢰할 수 있는 전체 목록임)
               setPlayers(formattedPlayers);
+              console.log("플레이어 목록 완전 교체:", formattedPlayers);
               
               // 현재 사용자의 준비 상태 확인
               if (currentUserId) {
-                console.log("현재 사용자 ID:", currentUserId);
-                // ID가 숫자인지 문자열인지 확인
                 const currentPlayer = formattedPlayers.find((player: any) => {
                   const playerId = player.id;
                   const currentId = typeof currentUserId === 'string' ? currentUserId : String(currentUserId);
-                  console.log(`비교: 플레이어 ID ${playerId} vs 현재 ID ${currentId}`);
                   return playerId === currentId;
                 });
                 
                 if (currentPlayer) {
-                  console.log("현재 사용자 준비 상태:", currentPlayer.isReady);
                   setIsReady(currentPlayer.isReady || false);
-                } else {
-                  console.log("현재 사용자를 플레이어 목록에서 찾을 수 없음");
                 }
+              }
+              
+              // 방 정보 인원수 업데이트
+              if (room) {
+                setRoom(prevRoom => {
+                  if (!prevRoom) return prevRoom;
+                  return {
+                    ...prevRoom,
+                    currentPlayers: formattedPlayers.length
+                  };
+                });
               }
             }
           } catch (error) {
@@ -366,167 +378,65 @@ export default function RoomPage() {
         }
         
         console.log(`방 상태 업데이트:`, status);
-
-        // 플레이어 목록 처리 개선
-        setPlayers(prevPlayers => {
-          // 새로운 플레이어 목록
-          const newPlayers = status.players || [];
-          
-          // 서버에서 room.players 배열을 함께 보내는 경우 - 두 정보 통합 처리
-          if (status.room && Array.isArray(status.room.players) && status.room.players.length > 0) {
-            console.log("room.players 배열 감지됨:", status.room.players);
-            
-            // room.players 배열이 있지만 players 배열이 비어있으면 무시 안함
-            if (newPlayers.length === 0) {
-              console.log("players 배열은 비어있지만 room.players 정보가 있어 처리 계속 진행");
-            }
-          }
-          
-          // 플레이어 목록이 비어있고 이전에 플레이어가 있었다면 유지
-          // room.players 배열이 있는 경우에는 계속 진행
-          if (newPlayers.length === 0 && prevPlayers.length > 0 && 
-              !(status.room && Array.isArray(status.room.players) && status.room.players.length > 0)) {
-            console.log("빈 플레이어 목록 수신됨, 현재 플레이어 유지", prevPlayers);
-            return prevPlayers;
-          }
-          
-          // --------- 서버 데이터 통합 처리 ---------
-          
-          // 실제 처리할 플레이어 목록 준비
-          let processedPlayers = [...newPlayers];
-          
-          // 서버에서 room.players 배열을 id 목록으로 보내는 경우, 기존 플레이어 정보와 통합
-          if (status.room && Array.isArray(status.room.players) && status.room.players.length > 0) {
-            // room.players에는 ID만 있고 players 배열이 비어있는 경우 
-            // 기존 플레이어 중에서 해당 ID를 가진 플레이어만 필터링하여 유지
-            if (newPlayers.length === 0) {
-              console.log("room.players의 ID 목록으로 플레이어 필터링:", status.room.players);
-              
-              const roomPlayerIds = status.room.players.map((id: number | string) => String(id));
-              const filteredPrevPlayers = prevPlayers.filter(p => 
-                roomPlayerIds.includes(p.id)
-              );
-              
-              if (filteredPrevPlayers.length > 0) {
-                console.log("기존 플레이어 중 room.players에 있는 ID와 일치하는 플레이어:", filteredPrevPlayers);
-                processedPlayers = filteredPrevPlayers;
-              }
-            }
-          }
-          
-          // 올바른 형식의 플레이어 객체인지 검증
-          const validatedPlayers = processedPlayers.filter((p: any) => {
-            // 필수 필드 확인
-            if (!p || typeof p !== 'object') return false;
-            // id가 있는지 확인
-            return p.id !== undefined;
+        
+        // 방 기본 정보만 업데이트 (플레이어 목록은 /topic/room/{id} 채널에서 관리)
+        if (status.room) {
+          setRoom(prevRoom => {
+            if (!prevRoom) return status.room;
+            // 방 정보 업데이트 (인원수는 플레이어 목록으로 확인)
+            return {
+              ...prevRoom,
+              ...status.room,
+              // players 배열을 덮어쓰지 않음 (플레이어 ID 목록만 참조용)
+            };
           });
-          
-          if (validatedPlayers.length < processedPlayers.length) {
-            console.warn(`유효하지 않은 플레이어 데이터 ${processedPlayers.length - validatedPlayers.length}개 제외됨`);
-          }
-          
-          // ID 중복 검사 및 로깅
-          const idCounts = new Map<string, number>();
-          validatedPlayers.forEach((p: any) => {
-            const id = typeof p.id === 'string' ? p.id : String(p.id);
-            idCounts.set(id, (idCounts.get(id) || 0) + 1);
-          });
-          
-          // 중복 ID가 있는지 확인
-          const duplicateIds = Array.from(idCounts.entries())
-            .filter(([_, count]) => count > 1)
-            .map(([id]) => id);
-            
-          if (duplicateIds.length > 0) {
-            console.warn("중복된 ID가 발견되었습니다:", duplicateIds);
-            
-            // 중복 ID 처리: 각 중복 항목에 고유 식별자 추가
-            let counter = 0;
-            const uniquePlayers = validatedPlayers.map((player: any) => {
-              const playerId = typeof player.id === 'string' ? player.id : String(player.id);
-              if (duplicateIds.includes(playerId)) {
-                // 현재 로그인된 사용자와 동일한 ID이면 수정하지 않음
-                if (currentUser && currentUser.id.toString() === playerId) {
-                  return player;
-                }
-                // 다른 중복 ID에는 고유 식별자 추가
-                counter++;
-                return {
-                  ...player,
-                  _uniqueId: `${playerId}-${counter}`,
-                  id: `${playerId}-${counter}`
-                };
-              }
-              return player;
-            });
-            
-            // 중복 처리된 플레이어 목록으로 교체
-            console.log("중복 ID 처리 후 플레이어 목록:", uniquePlayers);
-            validatedPlayers.length = 0;
-            validatedPlayers.push(...uniquePlayers);
-          }
-          
-          // 기존 플레이어를 ID 기준으로 맵으로 변환
-          const prevPlayersMap = new Map(prevPlayers.map(p => [p.id, p]));
-          
-          // 새 플레이어 목록과 기존 목록 병합
-          const mergedPlayers: PlayerProfile[] = [];
-          
-          // 디버깅 정보 출력
-          console.log("플레이어 병합 시작 - 새 플레이어:", validatedPlayers.length, "기존 플레이어:", prevPlayers.length);
-          
-          // 새 플레이어 목록의 각 플레이어 처리
-          validatedPlayers.forEach((newPlayer: any) => {
-            const playerId = typeof newPlayer.id === 'string' ? newPlayer.id : String(newPlayer.id);
-            console.log(`플레이어 처리: ID=${playerId}, 닉네임=${newPlayer.nickname || '익명'}`);
-            
-            // 기존 목록에 있는지 확인
-            const existingPlayer = prevPlayersMap.get(playerId);
-            if (existingPlayer) {
-              // 있으면 정보 업데이트하되 기존 정보도 보존
-              const updatedPlayer = {...existingPlayer, ...newPlayer};
-              mergedPlayers.push(updatedPlayer);
-              console.log(`- 기존 플레이어 업데이트: ${updatedPlayer.nickname}`);
-              prevPlayersMap.delete(playerId); // 처리됨 표시
-            } else {
-              // 없으면 새로 추가
-              mergedPlayers.push(newPlayer as PlayerProfile);
-              console.log(`- 새 플레이어 추가: ${newPlayer.nickname || '익명'}`);
-            }
-          });
-          
-          // 현재 사용자가 새 목록에 없으면 추가
-          if (currentUser && !mergedPlayers.some(p => p.id === currentUser.id.toString())) {
-            const currentPlayerInPrevList = prevPlayers.find(p => p.id === currentUser.id.toString());
-            if (currentPlayerInPrevList) {
-              console.log("현재 사용자가 새 목록에 없어 추가됨:", currentPlayerInPrevList.nickname);
-              mergedPlayers.push(currentPlayerInPrevList);
-            }
-          }
-          
-          console.log("병합된 플레이어 목록:", mergedPlayers);
-          
-          // 방 정보 업데이트
-          if (status.room && status.room.id === roomId) {
-            // 플레이어 수가 다른 경우 방 정보 업데이트
-            // 필요한 경우에만 currentPlayers 값 업데이트
-            setRoom(prevRoom => {
-              if (!prevRoom) return status.room;
-              return {
-                ...prevRoom,
-                ...status.room,
-                currentPlayers: Math.max(mergedPlayers.length, status.room.currentPlayers || 0)
-              };
-            });
-          }
-          
-          return mergedPlayers;
-        });
+        }
         
         // 게임 상태 업데이트
         if (status.gameStatus) {
           setGameStatus(status.gameStatus);
+        }
+        
+        // 플레이어 목록이 있고 플레이어가 없는 경우에만 처리
+        // (이는 /topic/room/{id} 채널의 플레이어 목록 관리를 보완하는 역할)
+        if (Array.isArray(status.players) && status.players.length > 0 && players.length === 0) {
+          console.log("방 상태 업데이트: 플레이어 목록 초기화");
+          
+          // 유효성 검사 및 형식 통일화
+          const validPlayers = status.players
+            .filter((p: any) => p && p.id)
+            .map((player: any) => {
+              const id = typeof player.id === 'number' ? String(player.id) : player.id;
+              return {
+                ...player,
+                id,
+                name: player.name || player.nickname || '사용자',
+                nickname: player.nickname || player.name || '사용자',
+                isOwner: Boolean(player.isOwner),
+                isReady: Boolean(player.isReady),
+                avatarUrl: player.avatarUrl || DEFAULT_AVATAR,
+                sessionId: player.sessionId || `session-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`
+              };
+            });
+            
+            if (validPlayers.length > 0) {
+              // 현재 사용자가 목록에 없는 경우 추가
+              if (currentUser && !validPlayers.some((p: PlayerProfile) => p.id === currentUser.id.toString())) {
+                const isCurrentUserOwner = room && room.ownerId === currentUser.id;
+                validPlayers.push({
+                  id: currentUser.id.toString(),
+                  name: currentUser.nickname || '사용자',
+                  nickname: currentUser.nickname || '사용자',
+                  isOwner: isCurrentUserOwner,
+                  isReady: false,
+                  avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR,
+                  sessionId: `session-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+                });
+              }
+              
+              setPlayers(validPlayers);
+              console.log("상태 채널에서 업데이트된 플레이어 목록:", validPlayers);
+            }
         }
       } catch (e) {
         console.error("방 상태 업데이트 메시지 처리 오류:", e, "원본 메시지:", message);
