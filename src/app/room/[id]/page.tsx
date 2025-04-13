@@ -267,6 +267,32 @@ export default function RoomPage() {
       // 방 페이지에서는 처리할 필요 없지만 구독은 유지
     });
     
+    // 방 상태 구독 추가 - 다른 사용자들의 상태 변화를 수신
+    subscribe(`/topic/room/${roomId}/status`, (data) => {
+      console.log("방 상태 업데이트 수신:", data);
+      
+      // 수신한 데이터로 플레이어 목록 업데이트
+      if (data.players && Array.isArray(data.players)) {
+        // 현재 사용자 정보를 유지하면서 플레이어 목록 업데이트
+        setPlayers(data.players);
+        
+        // 현재 사용자의 준비 상태 확인 및 업데이트
+        if (currentUser) {
+          const currentUserPlayer = data.players.find(
+            (player: {id: string}) => player.id === currentUser.id.toString()
+          );
+          if (currentUserPlayer) {
+            setIsReady(!!currentUserPlayer.isReady);
+          }
+        }
+      }
+      
+      // 방 정보 업데이트
+      if (data.room) {
+        setRoom(prevRoom => ({ ...prevRoom, ...data.room }));
+      }
+    });
+    
     // 시스템 초기 메시지
     setChatMessages([{
       type: "SYSTEM",
@@ -276,6 +302,22 @@ export default function RoomPage() {
       timestamp: Date.now(),
       roomId: roomId
     }]);
+  };
+
+  // 방 상태 브로드캐스트 함수 - 상태 변경 시 호출
+  const broadcastRoomStatus = () => {
+    if (!room || !currentUser) return;
+    
+    // 방 상태 정보 구성
+    const roomStatusData = {
+      room: room,
+      players: players,
+      timestamp: Date.now()
+    };
+    
+    // 방 상태 업데이트 메시지 발행
+    publish(`/app/room/${roomId}/status`, roomStatusData);
+    console.log("방 상태 업데이트 발행:", roomStatusData);
   };
 
   // 방 입장 처리
@@ -355,6 +397,9 @@ export default function RoomPage() {
       }
       
       console.log("방에 입장했습니다. 최종 플레이어 목록:", players);
+      
+      // 방 입장 후 자신의 상태를 다른 사용자들에게 브로드캐스트
+      setTimeout(() => broadcastRoomStatus(), 500);
     } catch (error) {
       console.error("방 입장에 실패했습니다:", error);
     }
@@ -422,6 +467,9 @@ export default function RoomPage() {
       // 로컬 상태 업데이트
       setIsReady(newReadyState);
       console.log(`준비 상태가 ${newReadyState ? '완료' : '취소'}되었습니다.`);
+      
+      // 준비 상태 변경 후 다른 사용자들에게 브로드캐스트
+      setTimeout(() => broadcastRoomStatus(), 500);
     } catch (error) {
       console.error("준비 상태 변경에 실패했습니다:", error);
       alert("준비 상태 변경에 실패했습니다. 다시 시도해주세요.");
@@ -454,6 +502,9 @@ export default function RoomPage() {
       });
       
       console.log("게임이 시작되었습니다.");
+      
+      // 게임 시작 후 방 상태를 브로드캐스트
+      setTimeout(() => broadcastRoomStatus(), 500);
     } catch (error) {
       console.error("게임 시작에 실패했습니다:", error);
       alert("게임 시작에 실패했습니다. 다시 시도해주세요.");
@@ -499,6 +550,25 @@ export default function RoomPage() {
       
       // 로비로 리다이렉트
       window.location.href = "/lobby";
+      
+      // 퇴장 시 자신을 제외한 플레이어 목록으로 상태 브로드캐스트
+      const updatedPlayers = players.filter((player: {id: string}) => 
+        player.id !== currentUser?.id.toString()
+      );
+      
+      // 퇴장 알림 메시지 발행
+      setTimeout(() => {
+        if (room) {
+          publish(`/app/room/${roomId}/status`, {
+            room: {
+              ...room,
+              currentPlayers: Math.max(0, (room.currentPlayers || 1) - 1)
+            },
+            players: updatedPlayers,
+            timestamp: Date.now()
+          });
+        }
+      }, 500);
     } catch (error) {
       console.error("방 퇴장에 실패했습니다:", error);
     }
@@ -598,6 +668,17 @@ export default function RoomPage() {
       console.log("플레이어 목록 강제 초기화 완료");
     }
   }, [room, currentUser, players.length]);
+
+  // 주기적으로 방 상태 공유 (60초마다)
+  useEffect(() => {
+    if (!room || !currentUser) return;
+    
+    const intervalId = setInterval(() => {
+      broadcastRoomStatus();
+    }, 60000); // 60초마다 상태 업데이트
+    
+    return () => clearInterval(intervalId);
+  }, [room, players, currentUser]);
 
   if (loading) {
     return (
