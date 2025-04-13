@@ -307,7 +307,7 @@ function RoomContent() {
     // 방 상태 구독
     subscribe(`/topic/room/${roomId}/status`, (message) => {
       try {
-        console.log("방 상태 업데이트:", message);
+        console.log("방 상태 업데이트 수신:", message);
         
         // 메시지가 없거나 유효하지 않은 경우 처리
         if (!message) return;
@@ -327,6 +327,9 @@ function RoomContent() {
             return;
           }
         }
+        
+        // 디버깅을 위한 상세 로그
+        console.log("파싱된 상태 데이터:", status);
         
         // 방 정보 업데이트
         if (status.room) {
@@ -348,16 +351,47 @@ function RoomContent() {
           console.log("플레이어 목록 업데이트 전:", players);
           console.log("받은 플레이어 목록:", status.players);
           
-          setPlayers(status.players);
-          console.log("플레이어 목록 업데이트 후 (예정):", status.players);
+          // 플레이어 데이터 구조 확인 및 표준화
+          const formattedPlayers = status.players.map((player: any) => {
+            // 기본 필드 확인 및 기본값 설정
+            const id = String(player.id || '');
+            const nickname = player.nickname || player.name || '알 수 없음';
+            const avatarUrl = player.avatarUrl || DEFAULT_AVATAR;
+            const isPlayerOwner = room ? String(room.ownerId) === id : false;
+            const isPlayerReady = Boolean(player.isReady);
+            
+            console.log(`플레이어 정보 처리: id=${id}, nickname=${nickname}, isReady=${isPlayerReady}`);
+            
+            return {
+              id,
+              nickname,
+              avatarUrl,
+              isOwner: isPlayerOwner,
+              isReady: isPlayerReady
+            };
+          });
+          
+          console.log("포맷된 플레이어 목록:", formattedPlayers);
+          
+          // 상태 업데이트 (함수형 업데이트 사용)
+          setPlayers(formattedPlayers);
           
           // 자신의 준비 상태 확인
           if (currentUser) {
-            const playerInfo = status.players.find((p: any) => p.id === currentUser.id.toString());
+            const playerInfo = formattedPlayers.find((p: any) => 
+              String(p.id) === String(currentUser.id)
+            );
+            
             if (playerInfo) {
+              console.log("내 준비 상태 업데이트:", playerInfo.isReady);
               setIsReady(playerInfo.isReady);
             }
           }
+          
+          // 강제 리렌더링을 위한 미세 지연 (필요한 경우 사용)
+          setTimeout(() => {
+            setPlayers(prev => [...prev]);
+          }, 50);
         }
         
         // 게임 상태 변경 처리 (예: 게임 시작 시 게임 페이지로 이동)
@@ -568,6 +602,22 @@ function RoomContent() {
       
       // 준비 상태 토글
       const newReadyState = !isReady;
+      console.log("준비 상태 변경 시도:", newReadyState);
+      
+      // 옵티미스틱 업데이트 - API 응답 전에 UI 먼저 업데이트
+      setIsReady(newReadyState);
+      
+      // 플레이어 목록 업데이트
+      setPlayers(prev => {
+        const updated = prev.map(player => {
+          if (currentUser && player.id === String(currentUser.id)) {
+            return { ...player, isReady: newReadyState };
+          }
+          return player;
+        });
+        console.log("준비 상태 변경 후 로컬 플레이어 목록:", updated);
+        return updated;
+      });
       
       // 준비 상태 변경 API 호출
       await client.POST(`/api/v1/rooms/{roomId}/ready`, {
@@ -583,30 +633,29 @@ function RoomContent() {
           senderName: "System",
           timestamp: Date.now()
         });
-      }
-      
-      // 로컬 상태 업데이트
-      setIsReady(newReadyState);
-      
-      // 플레이어 목록 업데이트
-      setPlayers(prev => {
-        const updated = prev.map(player => {
-          if (currentUser && player.id === currentUser.id.toString()) {
-            return { ...player, isReady: newReadyState };
-          }
-          return player;
-        });
         
-        // 상태 업데이트 브로드캐스트
-        publish(`/app/room/${roomId}/status`, {
-          players: updated,
+        // 준비 상태 변경 이벤트 발행
+        publish(`/app/room/ready/${roomId}`, {
+          roomId: parseInt(roomId),
+          playerId: currentUser.id,
+          isReady: newReadyState,
           timestamp: Date.now()
         });
-        
-        return updated;
-      });
+      }
+      
     } catch (error) {
       console.error("준비 상태 변경에 실패했습니다:", error);
+      
+      // 에러 발생 시 상태 원복
+      const newReadyState = !isReady; // 현재 상태 (업데이트된 상태)
+      setIsReady(!newReadyState); // 원래 상태로 되돌림
+      setPlayers(prev => prev.map(player => {
+        if (currentUser && player.id === String(currentUser.id)) {
+          return { ...player, isReady: !newReadyState };
+        }
+        return player;
+      }));
+      
       setToast({
         type: "error",
         message: "준비 상태 변경에 실패했습니다.",
@@ -1009,6 +1058,10 @@ function RoomContent() {
           <PlayerList 
             players={players}
             currentUserId={currentUser?.id || null}
+            isOwner={isOwner}
+            isReady={isReady}
+            onToggleReady={toggleReady}
+            roomStatus={room?.status || 'WAITING'}
           />
           {/* 방 정보 디버깅 */}
           <div className="mt-2 p-2 bg-blue-500/20 rounded text-xs text-white">
@@ -1021,6 +1074,8 @@ function RoomContent() {
             }) : '없음'}</div>
             <div>플레이어 수: {players.length}</div>
             <div>현재 사용자: {currentUser ? `${currentUser.id} (${currentUser.nickname})` : '없음'}</div>
+            <div>준비 상태: {isReady ? '준비 완료' : '대기 중'}</div>
+            <div>방장 여부: {isOwner ? '방장' : '일반 참가자'}</div>
           </div>
           
           {/* 게임 조작 영역 */}
@@ -1091,3 +1146,4 @@ export default function RoomPage() {
     </AppLayout>
   );
 }
+

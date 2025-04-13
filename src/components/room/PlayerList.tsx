@@ -9,16 +9,28 @@ const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/
 
 interface PlayerListProps {
   players: PlayerProfile[];
-  currentUserId: number | null;
+  currentUserId: string | number | null;
+  isOwner?: boolean;
+  isReady?: boolean;
+  onToggleReady?: () => void;
+  roomStatus?: string;
 }
 
-export default function PlayerList({ players, currentUserId }: PlayerListProps) {
+export default function PlayerList({ 
+  players, 
+  currentUserId, 
+  isOwner = false,
+  isReady = false,
+  onToggleReady,
+  roomStatus = 'WAITING'
+}: PlayerListProps) {
   const [cachedPlayers, setCachedPlayers] = useState<PlayerProfile[]>([]);
   
   // 플레이어 목록이 비어있지 않은 경우에만 캐시 업데이트
   useEffect(() => {
     if (players.length > 0) {
       console.log("플레이어 목록 캐시 업데이트:", players);
+      console.log("각 플레이어 준비 상태:", players.map(p => `${p.nickname}: ${p.isReady}`).join(', '));
       setCachedPlayers(players);
     }
   }, [players]);
@@ -35,7 +47,10 @@ export default function PlayerList({ players, currentUserId }: PlayerListProps) 
     playersOriginal: players.length,
     cachedPlayersCount: cachedPlayers.length,
     displayPlayers,
-    currentUserId 
+    currentUserId,
+    isOwner,
+    isReady,
+    roomStatus
   });
 
   return (
@@ -53,66 +68,86 @@ export default function PlayerList({ players, currentUserId }: PlayerListProps) 
           <p className="text-sm mt-2">다른 플레이어들이 입장하기를 기다려주세요.</p>
         </div>
       ) : (
-        <div className="space-y-3 max-h-[calc(100vh-24rem)] overflow-y-auto pr-2">
-          {displayPlayers.map((player) => (
-            <div 
-              key={player.id} 
-              className={`flex items-center gap-3 p-3 rounded-lg ${
-                player.id === currentUserId?.toString() 
-                  ? 'bg-indigo-900/40 border border-indigo-700/50' 
-                  : 'bg-gray-800/70'
-              }`}
-            >
-              <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-700">
-                {player.avatarUrl ? (
-                  <img 
-                    src={player.avatarUrl} 
-                    alt={player.nickname} 
-                    className="w-full h-full object-cover" 
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = DEFAULT_AVATAR;
-                    }}
-                  />
-                ) : (
-                  <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold">
-                    {player.nickname.charAt(0).toUpperCase()}
+        <>
+          <div className="space-y-3 max-h-[calc(100vh-28rem)] overflow-y-auto pr-2">
+            {displayPlayers.map((player) => {
+              const isCurrentUser = player.id === String(currentUserId);
+              return (
+                <div 
+                  key={player.id} 
+                  className={`flex items-center gap-3 p-3 rounded-lg ${
+                    isCurrentUser
+                      ? 'bg-indigo-900/40 border border-indigo-700/50' 
+                      : 'bg-gray-800/70'
+                  }`}
+                >
+                  <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-700">
+                    {player.avatarUrl ? (
+                      <img 
+                        src={player.avatarUrl} 
+                        alt={player.nickname} 
+                        className="w-full h-full object-cover" 
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = DEFAULT_AVATAR;
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold">
+                        {player.nickname.charAt(0).toUpperCase()}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              
-              <div className="flex-grow">
-                <div className="flex items-center">
-                  <span className="font-medium text-white">
-                    {player.nickname}
-                  </span>
-                  {player.isOwner && (
-                    <span className="ml-2 text-yellow-500" title="방장">
-                      <FaCrown />
-                    </span>
-                  )}
-                  {player.id === currentUserId?.toString() && (
-                    <span className="ml-1 px-1.5 py-0.5 bg-indigo-900/60 text-indigo-300 text-xs rounded">
-                      나
-                    </span>
-                  )}
+                  
+                  <div className="flex-grow">
+                    <div className="flex items-center">
+                      <span className="font-medium text-white">
+                        {player.nickname}
+                      </span>
+                      {player.isOwner && (
+                        <span className="ml-2 text-yellow-500" title="방장">
+                          <FaCrown />
+                        </span>
+                      )}
+                      {isCurrentUser && (
+                        <span className="ml-1 px-1.5 py-0.5 bg-indigo-900/60 text-indigo-300 text-xs rounded">
+                          나
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="flex items-center text-sm mt-1">
+                      {player.isReady ? (
+                        <span className="text-green-400 flex items-center">
+                          <FaCheckCircle className="mr-1" />
+                          준비 완료
+                        </span>
+                      ) : player.isOwner ? (
+                        <span className="text-yellow-400">방장</span>
+                      ) : (
+                        <span className="text-gray-400">대기 중</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                
-                <div className="flex items-center text-sm mt-1">
-                  {player.isReady ? (
-                    <span className="text-green-400 flex items-center">
-                      <FaCheckCircle className="mr-1" />
-                      준비 완료
-                    </span>
-                  ) : player.isOwner ? (
-                    <span className="text-yellow-400">방장</span>
-                  ) : (
-                    <span className="text-gray-400">대기 중</span>
-                  )}
-                </div>
-              </div>
+              );
+            })}
+          </div>
+          
+          {onToggleReady && roomStatus === 'WAITING' && !isOwner && (
+            <div className="mt-4 pt-3 border-t border-gray-700">
+              <button 
+                onClick={onToggleReady}
+                className={`w-full py-2 rounded-lg font-medium ${
+                  isReady 
+                    ? 'bg-red-600 hover:bg-red-700 text-white' 
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {isReady ? '준비 취소' : '준비 완료'}
+              </button>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   );
