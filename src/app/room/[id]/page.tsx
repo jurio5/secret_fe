@@ -916,7 +916,7 @@ export default function RoomPage() {
           </div>
           
           {/* 모바일에서는 선택된 탭만 표시 */}
-          <div className={`md:block ${activeTab !== 'players' && 'hidden'}`}>
+          <div className={`${activeTab !== 'players' ? 'hidden md:block' : 'block'}`}>
             <PlayerList players={players} currentUserId={currentUserId} />
           </div>
           
