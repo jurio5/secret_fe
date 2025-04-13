@@ -78,6 +78,9 @@ export default function RoomPage() {
   const [isReady, setIsReady] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'players' | 'chat'>('players');
   
+  // 플레이어 목록 초기화 여부 추적
+  const playersInitialized = useRef<boolean>(false);
+  
   // 채팅 관련 상태
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newChatMessage, setNewChatMessage] = useState<string>("");
@@ -97,7 +100,29 @@ export default function RoomPage() {
       
       if (response.data?.data) {
         console.log("방 정보 API 응답:", response.data.data); // 실제 API 응답 데이터 확인
-        setRoom(response.data.data);
+        
+        const roomData = response.data.data;
+        setRoom(roomData);
+        
+        // 현재 사용자 정보가 이미 있고, 방장인 경우 플레이어 목록 초기화
+        if (currentUser && roomData.ownerId === currentUser.id) {
+          console.log("현재 사용자가 방장이므로 플레이어 목록 초기화");
+          
+          // 서버에서 받은 플레이어 목록이 비어있으면 자신을 추가
+          if (!roomData.players || roomData.players.length === 0) {
+            const ownerPlayer = {
+              id: currentUser.id.toString(),
+              name: currentUser.nickname,
+              nickname: currentUser.nickname,
+              isOwner: true,
+              isReady: false,
+              avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR
+            };
+            
+            setPlayers([ownerPlayer]);
+            console.log("방장 플레이어 정보 설정:", ownerPlayer);
+          }
+        }
       } else {
         setError("방 정보를 불러오는데 실패했습니다.");
       }
@@ -137,27 +162,89 @@ export default function RoomPage() {
   // 웹소켓 구독 설정
   const setupWebSocket = () => {
     // 방 정보 업데이트 구독
-    subscribe(`/topic/rooms/${roomId}`, (data) => {
-      console.log("방 정보 업데이트:", data);
-      setRoom(data);
-    });
-    
-    // 플레이어 목록 구독
-    subscribe(`/topic/rooms/${roomId}/players`, (data) => {
-      console.log("플레이어 목록 업데이트:", data);
-      setPlayers(data);
+    subscribe(`/topic/room/${roomId}`, (data) => {
+      console.log("방 정보 업데이트 원본 데이터:", data);
       
-      // 현재 사용자의 준비 상태 확인
-      if (currentUserId) {
-        const currentPlayer = data.find((player: any) => player.id === currentUserId);
-        if (currentPlayer) {
-          setIsReady(currentPlayer.isReady || false);
+      // 타입이 있는 경우 (WebSocketRoomMessageResponse 형식)
+      if (data && data.type) {
+        console.log(`메시지 타입: ${data.type}`);
+        
+        // room 정보 업데이트 - 기존 방 정보는 유지하고 새로운 속성만 업데이트
+        if (data.type === 'ROOM_UPDATED' || data.type === 'JOIN' || data.type === 'LEAVE') {
+          setRoom(prev => {
+            if (!prev) return data;
+            return { ...prev, ...data };
+          });
         }
+        
+        // data 필드에 플레이어 목록이 포함되어 있는 경우
+        if (data.data) {
+          try {
+            console.log("data 필드 원본:", data.data);
+            
+            // 문자열인 경우 JSON으로 파싱
+            let playersData;
+            if (typeof data.data === 'string') {
+              playersData = JSON.parse(data.data);
+              console.log("JSON 파싱 후 플레이어 데이터:", playersData);
+            } else if (Array.isArray(data.data)) {
+              playersData = data.data;
+              console.log("배열 형태의 플레이어 데이터:", playersData);
+            } else {
+              console.log("알 수 없는 데이터 형식:", typeof data.data);
+              return;
+            }
+            
+            // 플레이어 목록이 비어있을 경우, 현재 플레이어 목록이 있다면 유지
+            if (Array.isArray(playersData)) {
+              if (playersData.length === 0 && players.length > 0) {
+                console.log("서버에서 빈 플레이어 목록이 전송됨, 현재 목록 유지:", players);
+              } else if (playersData.length > 0) {
+                console.log(`서버에서 ${playersData.length}명의 플레이어 목록 수신`);
+                setPlayers(playersData);
+                
+                // 현재 사용자의 준비 상태 확인
+                if (currentUserId) {
+                  console.log("현재 사용자 ID:", currentUserId);
+                  // ID가 숫자인지 문자열인지 확인
+                  const currentPlayer = playersData.find((player: any) => {
+                    const playerId = typeof player.id === 'string' ? player.id : String(player.id);
+                    const currentId = typeof currentUserId === 'string' ? currentUserId : String(currentUserId);
+                    console.log(`비교: 플레이어 ID ${playerId} vs 현재 ID ${currentId}`);
+                    return playerId === currentId;
+                  });
+                  
+                  if (currentPlayer) {
+                    console.log("현재 사용자 준비 상태:", currentPlayer.isReady);
+                    setIsReady(currentPlayer.isReady || false);
+                  } else {
+                    console.log("현재 사용자를 플레이어 목록에서 찾을 수 없음");
+                  }
+                }
+              }
+            } else {
+              console.log("플레이어 목록이 배열이 아님:", playersData);
+            }
+          } catch (error) {
+            console.error("플레이어 데이터 파싱 오류:", error);
+          }
+        } else {
+          console.log("메시지에 data 필드가 없음");
+        }
+      } else if (data && typeof data === 'object') {
+        // 단순 객체인 경우 (room 정보만 담긴 형태) - 기존 방 정보 유지
+        console.log("단순 객체 형태의 데이터 수신");
+        setRoom(prev => {
+          if (!prev) return data;
+          return { ...prev, ...data };
+        });
+      } else {
+        console.log("처리할 수 없는 형식의 데이터:", typeof data);
       }
     });
     
     // 방 채팅 구독
-    subscribe(`/topic/rooms/${roomId}/chat`, (message) => {
+    subscribe(`/topic/room/chat/${roomId}`, (message) => {
       // 채팅 메시지 처리
       setChatMessages((prevMessages) => {
         const newMessage = {
@@ -194,10 +281,18 @@ export default function RoomPage() {
   // 방 입장 처리
   const joinRoom = async () => {
     try {
-      await (client.POST as any)(`/api/v1/rooms/${roomId}/join`, {});
+      console.log("방 입장 시도, 현재 사용자:", currentUser);
+      
+      if (!currentUser) {
+        console.log("사용자 정보가 없어 방 입장을 위해 대기합니다.");
+        return; // 사용자 정보가 없으면 방 입장 중단
+      }
+      
+      const response = await (client.POST as any)(`/api/v1/rooms/${roomId}/join`, {});
+      console.log("방 입장 API 응답:", response);
       
       // 입장 성공 시 메시지를 방에 전송
-      publish(`/app/rooms/${roomId}/join`, {
+      publish(`/app/room/${roomId}/join`, {
         roomId: parseInt(roomId)
       });
       
@@ -211,15 +306,55 @@ export default function RoomPage() {
       });
       
       // 방 입장 시스템 메시지
-      if (currentUser) {
-        publish(`/app/rooms/${roomId}/chat`, {
-          type: "SYSTEM",
-          content: `${currentUser.nickname}님이 입장했습니다.`,
-          timestamp: Date.now()
-        });
+      publish(`/app/room/chat/${roomId}`, {
+        type: "SYSTEM",
+        content: `${currentUser.nickname}님이 입장했습니다.`,
+        timestamp: Date.now()
+      });
+      
+      // 서버 응답과 관계 없이 클라이언트 측에서 플레이어 추가
+      console.log("플레이어 목록 초기화 - 현재 방 상태 확인:", room);
+      
+      // 현재 사용자가 방장인지 확인
+      const isCurrentUserOwner = room && currentUser.id === room.ownerId;
+      console.log("현재 사용자 방장 여부:", isCurrentUserOwner);
+      
+      // 임시 플레이어 정보 생성
+      const newPlayer = {
+        id: currentUser.id.toString(), // 문자열로 통일
+        name: currentUser.nickname,
+        nickname: currentUser.nickname,
+        isOwner: isCurrentUserOwner,
+        isReady: false,
+        avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR
+      };
+      
+      // 방에 플레이어 목록이 없거나 비어있으면 임시 플레이어 목록 생성
+      if (!room?.players || room.players.length === 0 || players.length === 0) {
+        console.log("플레이어 목록이 없거나 비어있어 임시 목록 생성");
+        setPlayers([newPlayer]);
+      } else {
+        // 기존 목록이 있으면 현재 사용자가 리스트에 없을 경우에만 추가
+        const isUserInList = players.some(player => 
+          player.id === currentUser.id.toString() || player.id === currentUser.id);
+        
+        if (!isUserInList) {
+          console.log("기존 플레이어 목록에 현재 사용자 추가");
+          setPlayers(prevPlayers => [...prevPlayers, newPlayer]);
+        } else {
+          console.log("현재 사용자가 이미 플레이어 목록에 있음");
+        }
       }
       
-      console.log("방에 입장했습니다.");
+      // 서버 데이터와 클라이언트 상태를 동기화하기 위해 방 정보 업데이트
+      if (room) {
+        setRoom(prevRoom => ({
+          ...prevRoom,
+          currentPlayers: Math.max(1, prevRoom?.currentPlayers || 0),
+        }));
+      }
+      
+      console.log("방에 입장했습니다. 최종 플레이어 목록:", players);
     } catch (error) {
       console.error("방 입장에 실패했습니다:", error);
     }
@@ -230,7 +365,7 @@ export default function RoomPage() {
     if (!newChatMessage.trim() || !currentUser) return;
     
     // 채팅 메시지 발행
-    publish(`/app/rooms/${roomId}/chat`, {
+    publish(`/app/room/chat/${roomId}`, {
       type: "CHAT",
       content: newChatMessage,
       senderId: currentUser.id,
@@ -278,7 +413,7 @@ export default function RoomPage() {
       });
       
       // 메시지 발행 - 방 내 플레이어에게 알림
-      publish(`/app/rooms/${roomId}/chat`, {
+      publish(`/app/room/chat/${roomId}`, {
         type: "SYSTEM",
         content: `${currentUser?.nickname || '플레이어'}님이 ${newReadyState ? '준비 완료' : '준비 취소'}하였습니다.`,
         timestamp: Date.now()
@@ -302,22 +437,6 @@ export default function RoomPage() {
         return;
       }
       
-      // 플레이어 수 확인 (최소 2명 이상)
-      if (players.length < 2) {
-        alert("게임을 시작하려면 최소 2명의 플레이어가 필요합니다.");
-        return;
-      }
-      
-      // 모든 참가자가 준비 완료 상태인지 확인 (방장 제외)
-      const allPlayersReady = players.every(player => 
-        player.isOwner || player.isReady
-      );
-      
-      if (!allPlayersReady) {
-        alert("모든 플레이어가 준비를 완료해야 게임을 시작할 수 있습니다.");
-        return;
-      }
-      
       // 게임이 이미 시작된 상태인지 확인
       if (room?.status !== 'WAITING') {
         console.log("게임이 이미 시작되었습니다.");
@@ -328,7 +447,7 @@ export default function RoomPage() {
       await (client.PATCH as any)(`/api/v1/rooms/${roomId}/start`, {});
       
       // 알림 메시지
-      publish(`/app/rooms/${roomId}/chat`, {
+      publish(`/app/room/chat/${roomId}`, {
         type: "SYSTEM",
         content: "게임이 시작되었습니다!",
         timestamp: Date.now()
@@ -346,7 +465,7 @@ export default function RoomPage() {
     try {
       // 퇴장 시스템 메시지
       if (currentUser) {
-        publish(`/app/rooms/${roomId}/chat`, {
+        publish(`/app/room/chat/${roomId}`, {
           type: "SYSTEM",
           content: `${currentUser.nickname}님이 퇴장했습니다.`,
           timestamp: Date.now()
@@ -356,7 +475,7 @@ export default function RoomPage() {
       await (client.POST as any)(`/api/v1/rooms/${roomId}/leave`, {});
       
       // 퇴장 메시지 전송
-      publish(`/app/rooms/${roomId}/leave`, {
+      publish(`/app/room/${roomId}/leave`, {
         roomId: parseInt(roomId)
       });
       
@@ -370,9 +489,8 @@ export default function RoomPage() {
       });
       
       // 웹소켓 구독 해제
-      unsubscribe(`/topic/rooms/${roomId}`);
-      unsubscribe(`/topic/rooms/${roomId}/players`);
-      unsubscribe(`/topic/rooms/${roomId}/chat`);
+      unsubscribe(`/topic/room/${roomId}`);
+      unsubscribe(`/topic/room/chat/${roomId}`);
       unsubscribe("/topic/lobby/users");
       unsubscribe("/topic/lobby/status");
       
@@ -393,24 +511,39 @@ export default function RoomPage() {
     localStorage.setItem('intentional_navigation', 'true');
   }, []);
 
+  // 웹소켓 설정 및 방 입장 순서 제어
   useEffect(() => {
-    // 방 정보 로드
-    fetchRoomData();
-    
-    // 사용자 정보 로드
-    fetchCurrentUser();
-    
-    // 웹소켓 구독 설정
+    // 웹소켓 구독 설정 (페이지 진입 시 가장 먼저 실행)
     setupWebSocket();
     
-    // 방 입장
-    joinRoom();
+    // 방 정보와 사용자 정보를 순차적으로 로드
+    const loadData = async () => {
+      try {
+        console.log("페이지 로드 - 데이터 초기화 시작");
+        
+        // 방 정보 로드
+        await fetchRoomData();
+        console.log("방 정보 로드 완료");
+        
+        // 사용자 정보 로드
+        await fetchCurrentUser();
+        console.log("사용자 정보 로드 완료");
+        
+        // 모든 데이터가 로드된 후 방 입장
+        await joinRoom();
+        console.log("방 입장 프로세스 완료");
+      } catch (error) {
+        console.error("방 데이터 로드 또는 입장 중 오류:", error);
+      }
+    };
     
-    // 컴포넌트 언마운트 시 웹소켓 구독 해제 및 방 퇴장
+    loadData();
+    
+    // 컴포넌트 언마운트 시 웹소켓 구독 해제
     return () => {
-      unsubscribe(`/topic/rooms/${roomId}`);
-      unsubscribe(`/topic/rooms/${roomId}/players`);
-      unsubscribe(`/topic/rooms/${roomId}/chat`);
+      console.log("컴포넌트 언마운트 - 웹소켓 구독 해제");
+      unsubscribe(`/topic/room/${roomId}`);
+      unsubscribe(`/topic/room/chat/${roomId}`);
       unsubscribe("/topic/lobby/users");
       unsubscribe("/topic/lobby/status");
     };
@@ -429,6 +562,42 @@ export default function RoomPage() {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [chatMessages]);
+
+  // 강제 플레이어 목록 업데이트
+  // room과 currentUser가 모두 로드된 후 players가 비어있으면 직접 설정
+  useEffect(() => {
+    if (!playersInitialized.current && room && currentUser && players.length === 0) {
+      console.log("강제 플레이어 목록 초기화 시도");
+      
+      // 방장 여부 확인
+      const isCurrentUserOwner = currentUser.id === room.ownerId;
+      console.log("현재 사용자 방장 여부 확인:", isCurrentUserOwner);
+      
+      // 플레이어 목록 직접 생성
+      const newPlayer = {
+        id: currentUser.id.toString(),
+        name: currentUser.nickname,
+        nickname: currentUser.nickname,
+        isOwner: isCurrentUserOwner,
+        isReady: false,
+        avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR
+      };
+      
+      console.log("생성된 플레이어 정보:", newPlayer);
+      setPlayers([newPlayer]);
+      
+      // 방 정보에 현재 인원 업데이트
+      if (room) {
+        setRoom(prevRoom => ({
+          ...prevRoom, 
+          currentPlayers: Math.max(1, prevRoom?.currentPlayers || 0)
+        }));
+      }
+      
+      playersInitialized.current = true;
+      console.log("플레이어 목록 강제 초기화 완료");
+    }
+  }, [room, currentUser, players.length]);
 
   if (loading) {
     return (
@@ -581,6 +750,50 @@ export default function RoomPage() {
                   {players.length}명
                 </span>
               </h2>
+              
+              {/* 플레이어 목록 디버그 정보 */}
+              {players.length === 0 && (
+                <div className="mb-4 p-3 bg-yellow-900/30 border border-yellow-700/40 rounded-lg text-yellow-200 text-sm">
+                  <div className="font-semibold mb-1">플레이어 목록이 비어있습니다.</div>
+                  <div>현재 방 상태: {room?.status || '정보 없음'}</div>
+                  <div>현재 인원: {room?.currentPlayers || 0}/{room?.capacity || 0}</div>
+                  <div>사용자 ID: {currentUserId || '정보 없음'}</div>
+                  <div className="flex mt-2 space-x-2">
+                    <button 
+                      onClick={() => console.log('Room:', room, 'Players:', players, 'CurrentUser:', currentUser)}
+                      className="px-2 py-1 bg-yellow-800/50 text-yellow-200 rounded-md text-xs hover:bg-yellow-800/70"
+                    >
+                      디버그 정보 출력
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (currentUser && room) {
+                          const newPlayer = {
+                            id: currentUser.id.toString(),
+                            name: currentUser.nickname,
+                            nickname: currentUser.nickname,
+                            isOwner: currentUser.id === room.ownerId,
+                            isReady: false,
+                            avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR
+                          };
+                          setPlayers([newPlayer]);
+                          console.log("수동으로 플레이어 목록 설정:", newPlayer);
+                          
+                          setRoom(prevRoom => ({
+                            ...prevRoom,
+                            currentPlayers: 1
+                          }));
+                        } else {
+                          console.error("현재 사용자 또는 방 정보 없음");
+                        }
+                      }}
+                      className="px-2 py-1 bg-blue-800/50 text-blue-200 rounded-md text-xs hover:bg-blue-800/70"
+                    >
+                      수동으로 플레이어 추가
+                    </button>
+                  </div>
+                </div>
+              )}
               
               <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
                 {players.map((player) => (
@@ -769,12 +982,8 @@ export default function RoomPage() {
               {isOwner ? (
                 <button
                   onClick={startGame}
-                  disabled={players.length < 2 || !players.every(p => p.isOwner || p.isReady)}
-                  className={`px-8 py-4 rounded-xl font-bold flex items-center justify-center min-w-[160px] transition-all transform hover:scale-105 shadow-lg ${
-                    players.length < 2 || !players.every(p => p.isOwner || p.isReady)
-                      ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white shadow-green-700/30'
-                  }`}
+                  disabled={false}
+                  className="px-8 py-4 rounded-xl font-bold flex items-center justify-center min-w-[160px] transition-all transform hover:scale-105 shadow-lg bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white shadow-green-700/30"
                 >
                   <FaPlay className="mr-2" />
                   게임 시작하기
@@ -808,13 +1017,7 @@ export default function RoomPage() {
             {/* 게임 시작 조건 안내 메시지 */}
             {isOwner && (
               <div className="mt-4 text-center text-sm text-gray-400">
-                {players.length < 2 ? (
-                  "게임을 시작하려면 최소 2명의 플레이어가 필요합니다."
-                ) : !players.every(p => p.isOwner || p.isReady) ? (
-                  "모든 플레이어가 준비 완료해야 게임을 시작할 수 있습니다."
-                ) : (
-                  "모든 준비가 완료되었습니다. 게임을 시작할 수 있습니다!"
-                )}
+                방장은 언제든지 게임을 시작할 수 있습니다.
               </div>
             )}
           </div>
