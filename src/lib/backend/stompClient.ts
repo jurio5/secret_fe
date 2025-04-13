@@ -149,6 +149,18 @@ const performSubscribe = (
         }
       }
       
+      // ROOM_CREATED 특수 메시지 처리
+      if (destination === "/topic/lobby" && message.body.startsWith("ROOM_CREATED:")) {
+        const roomId = message.body.split(":")[1];
+        console.debug("방 생성 메시지 감지:", roomId);
+        callback({
+          type: "ROOM_CREATED",
+          roomId: parseInt(roomId),
+          timestamp: Date.now()
+        });
+        return;
+      }
+      
       // JSON 파싱 및 Java 객체 파싱 모두 실패 시 원본 메시지를 전달하고 로그 출력
       console.warn(`메시지 파싱 실패 (${destination}):`, error);
       console.debug("원본 메시지:", message.body);

@@ -129,6 +129,13 @@ function LobbyContent({
   const [isCreatingRoom, setIsCreatingRoom] = useState<boolean>(false);
   const [roomCreateError, setRoomCreateError] = useState<string>("");
   
+  // 비밀번호 입력 모달 상태 추가
+  const [showPasswordModal, setShowPasswordModal] = useState<boolean>(false);
+  const [selectedRoom, setSelectedRoom] = useState<RoomResponse | null>(null);
+  const [roomPassword, setRoomPassword] = useState<string>("");
+  const [isJoiningRoom, setIsJoiningRoom] = useState<boolean>(false);
+  const [joinRoomError, setJoinRoomError] = useState<string>("");
+  
   // 세션 로딩 재시도 횟수 관리
   const userLoadRetryCountRef = useRef<number>(0);
   
@@ -1196,6 +1203,50 @@ function LobbyContent({
     };
   }, []);
 
+  // 방 입장 처리 함수 추가
+  const handleJoinRoom = async (roomId: string, password?: string) => {
+    setIsJoiningRoom(true);
+    
+    try {
+      // API 엔드포인트 설정
+      const endpoint = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/rooms/${roomId}/join`;
+      
+      // 방 종류에 따라 다른 요청 보내기
+      if (password) {
+        // 비공개 방인 경우
+        await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ password }),
+        });
+      } else {
+        await fetch(endpoint, {
+          method: 'POST',
+        });
+      }
+      
+      // 방 입장 성공
+      localStorage.setItem('intentional_navigation', 'true');
+      window.location.href = `/room/${roomId}`;
+    } catch (error) {
+      console.error("방 입장에 실패했습니다:", error);
+      setJoinRoomError("비밀번호가 올바르지 않거나 입장할 수 없습니다.");
+    } finally {
+      setIsJoiningRoom(false);
+    }
+  };
+
+  // 비밀번호 입력 처리 함수
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!selectedRoom?.id) return;
+    
+    handleJoinRoom(String(selectedRoom.id), roomPassword);
+  };
+
   return (
     <div className="container mx-auto px-4 py-8 flex flex-col h-full">
       {/* 토스트 메시지 표시 */}
@@ -1353,9 +1404,17 @@ function LobbyContent({
                     className="bg-gray-800 border border-gray-700 rounded-xl p-4 hover:border-blue-500 transition-colors cursor-pointer shadow-md"
                     onClick={() => {
                       if (room.id) {
-                        // 방 입장 시 의도적 네비게이션 플래그 설정
-                        localStorage.setItem('intentional_navigation', 'true');
-                        window.location.href = `/room/${room.id}`;
+                        if (room.isPrivate) {
+                          // 비공개 방인 경우 비밀번호 입력 모달 표시
+                          setSelectedRoom(room);
+                          setShowPasswordModal(true);
+                          setRoomPassword("");
+                          setJoinRoomError("");
+                        } else {
+                          // 공개 방인 경우 바로 입장
+                          localStorage.setItem('intentional_navigation', 'true');
+                          window.location.href = `/room/${String(room.id)}`;
+                        }
                       } else {
                         alert("잘못된 방 정보입니다.");
                       }
@@ -1382,6 +1441,15 @@ function LobbyContent({
                         </svg>
                         {room.ownerNickname || "퀴즐"}
                       </div>
+                      
+                      {room.isPrivate && (
+                        <div className="text-xs bg-red-900/50 text-red-300 px-2 py-1 rounded-md flex items-center">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                          비공개
+                        </div>
+                      )}
                       
                       {room.difficulty && (
                         <div className="text-xs bg-indigo-900/50 text-indigo-300 px-2 py-1 rounded-md flex items-center">
@@ -1494,7 +1562,7 @@ function LobbyContent({
                               e.stopPropagation();
                               // 방 입장 시 의도적 네비게이션 플래그 설정
                               localStorage.setItem('intentional_navigation', 'true');
-                              window.location.href = `/room/${user.roomId}`;
+                              window.location.href = `/room/${String(user.roomId)}`;
                             }}
                           >
                             입장
@@ -2287,6 +2355,86 @@ function LobbyContent({
                   ) : "방 생성하기"}
                 </button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 비밀번호 입력 모달 */}
+      {showPasswordModal && selectedRoom && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-800/90 border border-gray-700 rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6 relative">
+            {/* 닫기 버튼 */}
+            <button 
+              onClick={() => {
+                setShowPasswordModal(false);
+                setSelectedRoom(null);
+                setRoomPassword("");
+                setJoinRoomError("");
+              }}
+              className="absolute top-4 right-4 bg-gray-700 hover:bg-gray-600 p-1.5 rounded-full text-white"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            
+            <h2 className="text-2xl font-bold text-white mb-2">비공개 방</h2>
+            <p className="text-gray-400 mb-4">이 방에 입장하려면 비밀번호를 입력하세요.</p>
+            
+            <div className="flex items-center gap-2 mb-6 bg-gray-900/40 rounded-lg p-3">
+              <div className="text-red-400">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <div>
+                <div className="text-white font-medium">{selectedRoom.title}</div>
+                <div className="text-xs text-gray-400">방장: {selectedRoom.ownerNickname}</div>
+              </div>
+            </div>
+            
+            {joinRoomError && (
+              <div className="bg-red-900/30 text-red-400 p-3 rounded-lg mb-4 border border-red-800/30">
+                {joinRoomError}
+              </div>
+            )}
+            
+            <form onSubmit={handlePasswordSubmit}>
+              <div className="mb-4">
+                <label htmlFor="roomPassword" className="block text-sm font-medium text-gray-300 mb-1">비밀번호 (4자리)</label>
+                <input 
+                  type="password" 
+                  id="roomPassword" 
+                  value={roomPassword}
+                  onChange={(e) => setRoomPassword(e.target.value)}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="0000"
+                  maxLength={4}
+                  pattern="\d{4}"
+                  required
+                />
+              </div>
+              
+              <button
+                type="submit"
+                disabled={isJoiningRoom || roomPassword.length !== 4}
+                className={`w-full ${
+                  isJoiningRoom || roomPassword.length !== 4
+                    ? "bg-gray-600 cursor-not-allowed"
+                    : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+                } text-white py-3 rounded-lg font-medium transition-all`}
+              >
+                {isJoiningRoom ? (
+                  <div className="flex items-center justify-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    입장 중...
+                  </div>
+                ) : "입장하기"}
+              </button>
             </form>
           </div>
         </div>
