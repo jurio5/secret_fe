@@ -768,54 +768,15 @@ function LobbyContent() {
   }, [showNicknameModal, currentUser?.status, currentUser?.nickname]);
 
   const handleUserClick = async (user: User | ActiveUser) => {
-    // 클릭한 사용자가 현재 사용자와 동일한 경우, 로컬 상태에서 최신 정보 사용
-    if (currentUser && user.id === currentUser.id) {
-      const userProfile: UserProfile = {
-        id: currentUser.id,
-        nickname: currentUser.nickname,
-        avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR,
-        level: userProfileCache[currentUser.id]?.level || 1,
-        exp: userProfileCache[currentUser.id]?.exp || 0,
-        point: userProfileCache[currentUser.id]?.point || 0,
-        loading: false
-      };
-      
-      // 캐시 업데이트
-      userProfileCache[currentUser.id] = userProfile;
-      
-      setSelectedUser(userProfile);
-      setShowProfileModal(true);
-      return;
-    }
-    
-    // 캐시에 사용자 정보가 있으면서 마지막 업데이트가 1분 이내라면 캐시 사용
-    const now = Date.now();
-    const cacheTime = userProfileCache[user.id]?.lastUpdated || 0;
-    const isCacheValid = now - cacheTime < 60000; // 1분(60000ms) 이내
-    
-    if (userProfileCache[user.id] && isCacheValid) {
-      setSelectedUser({
-        ...userProfileCache[user.id],
-        loading: false
-      });
-      setShowProfileModal(true);
-      return;
-    }
-    
-    // 로딩 상태로 모달 표시
-    setSelectedUser({
-      id: user.id,
-      nickname: user.nickname,
-      avatarUrl: user.avatarUrl || DEFAULT_AVATAR,
-      level: 0,
-      exp: 0,
-      point: 0,
-      loading: true
-    });
-    setShowProfileModal(true);
-
     try {
-      // 실제 API를 통해 사용자 프로필 가져오기
+      // 클릭한 사용자가 현재 사용자와 동일한 경우, 로컬 상태에서 최신 정보 사용
+      if (currentUser && user.id === currentUser.id) {
+        setSelectedUser(currentUser as User);
+        setShowProfileModal(true);
+        return;
+      }
+      
+      // 사용자 정보 가져오기
       const response = await client.GET(`/api/v1/members/{memberId}`, {
         params: { path: { memberId: user.id } }
       }) as ApiResponse<UserProfile>;
@@ -831,10 +792,8 @@ function LobbyContent() {
       };
       userProfileCache[user.id] = profileWithTimestamp;
       
-      setSelectedUser({
-        ...profileWithTimestamp,
-        loading: false
-      });
+      setSelectedUser(profileWithTimestamp);
+      setShowProfileModal(true);
     } catch (error) {
       console.error("프로필 정보를 가져오는데 실패했습니다:", error);
       // 에러 발생 시 기본 정보로 대체
@@ -1155,7 +1114,7 @@ function LobbyContent() {
             {currentUser ? (
               <div 
                 className="flex items-center bg-gray-800/80 pl-3 pr-4 py-1.5 rounded-full border border-gray-700/50 cursor-pointer hover:bg-gray-700/50 transition-all"
-                onClick={() => handleUserClick(currentUser)}
+                onClick={() => handleUserClick(currentUser as User)}
               >
                 <div className="w-7 h-7 rounded-full overflow-hidden mr-2 border border-gray-700">
                   {currentUser.avatarUrl ? (
@@ -1285,7 +1244,7 @@ function LobbyContent() {
                     className={`flex items-center gap-3 p-2 rounded-lg hover:bg-gray-700/60 cursor-pointer transition-colors duration-200 ${
                       currentUser && user.id === currentUser.id ? 'bg-gray-700/40 border border-blue-500/30' : ''
                     }`}
-                    onClick={() => handleUserClick(user)}
+                    onClick={() => handleUserClick(user as User)}
                   >
                     <div className="w-8 h-8 rounded-full border border-gray-700 overflow-hidden">
                       {user.avatarUrl ? (
