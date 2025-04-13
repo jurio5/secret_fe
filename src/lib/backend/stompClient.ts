@@ -136,33 +136,94 @@ const performSubscribe = (
   const subscription = stompClient.subscribe(destination, (message) => {
     try {
       // JSON 파싱 시도
-      const parsedMessage = JSON.parse(message.body);
-      callback(parsedMessage);
-    } catch (error) {
-      // JSON 파싱 실패 시 Java 객체 문자열 파싱 시도
-      if (message.body.includes("WebSocketChatMessageResponse[")) {
-        const javaObject = parseJavaObjectString(message.body);
-        if (javaObject) {
-          console.debug("Java 객체 문자열 파싱 성공:", javaObject);
-          callback(javaObject);
+      let parsedMessage;
+      try {
+        parsedMessage = JSON.parse(message.body);
+      } catch (jsonError) {
+        console.warn(`JSON 파싱 실패 (${destination}):`, jsonError);
+        console.debug("원본 메시지:", message.body);
+        
+        // Java 객체 문자열 파싱 시도
+        if (message.body.includes("WebSocketChatMessageResponse[")) {
+          const javaObject = parseJavaObjectString(message.body);
+          if (javaObject) {
+            console.debug("Java 객체 문자열 파싱 성공:", javaObject);
+            callback(javaObject);
+            return;
+          }
+        }
+        
+        // 특정 패턴 메시지 처리 (ROOM_CREATED 등)
+        if (destination === "/topic/lobby" && message.body.startsWith("ROOM_CREATED:")) {
+          const roomId = message.body.split(":")[1];
+          console.debug("방 생성 메시지 감지:", roomId);
+          callback({
+            type: "ROOM_CREATED",
+            roomId: parseInt(roomId),
+            timestamp: Date.now()
+          });
           return;
         }
-      }
-      
-      // ROOM_CREATED 특수 메시지 처리
-      if (destination === "/topic/lobby" && message.body.startsWith("ROOM_CREATED:")) {
-        const roomId = message.body.split(":")[1];
-        console.debug("방 생성 메시지 감지:", roomId);
-        callback({
-          type: "ROOM_CREATED",
-          roomId: parseInt(roomId),
-          timestamp: Date.now()
-        });
+        
+        // 채팅 메시지 관련 처리 (/topic/room/chat/ 등)
+        if (destination.includes('/chat/') || destination.includes('/room/chat/') || destination.includes('/game/chat/')) {
+          console.log("🔰 채팅 메시지 감지:", {
+            destination,
+            rawMessage: message.body,
+            timestamp: new Date().toISOString()
+          });
+          
+          let content = message.body;
+          let type = "CHAT";
+          let roomId = destination.split('/').pop() || "unknown";
+          
+          // 메시지가 따옴표로 감싸진 경우 제거
+          if (content.startsWith('"') && content.endsWith('"')) {
+            try {
+              content = content.slice(1, -1);
+              console.log("따옴표 제거된 내용:", content);
+            } catch (e) {
+              console.warn("따옴표 제거 실패:", e);
+            }
+          }
+          
+          // 메시지가 이스케이프된 경우 정상화
+          if (content.includes('\\')) {
+            try {
+              content = JSON.parse(`"${content}"`);
+              console.log("이스케이프 처리된 내용:", content);
+            } catch (e) {
+              console.warn("이스케이프 문자열 처리 실패:", e);
+            }
+          }
+          
+          console.log("📨 처리된 채팅 메시지:", {
+            content,
+            roomId,
+            timestamp: new Date().toISOString()
+          });
+          
+          // 채팅 메시지용 기본 객체 생성
+          callback({
+            type,
+            content,
+            senderId: "system",
+            senderName: "서버",
+            timestamp: Date.now(),
+            roomId
+          });
+          return;
+        }
+        
+        // 기타 메시지는 원본 반환
+        callback(message.body);
         return;
       }
       
-      // JSON 파싱 및 Java 객체 파싱 모두 실패 시 원본 메시지를 전달하고 로그 출력
-      console.warn(`메시지 파싱 실패 (${destination}):`, error);
+      // JSON 파싱 성공 케이스
+      callback(parsedMessage);
+    } catch (error) {
+      console.error("메시지 파싱 실패:", error);
       console.debug("원본 메시지:", message.body);
       
       // 채팅 메시지 특수 처리 (/topic/lobby/chat 등)
