@@ -22,8 +22,11 @@ const FriendModal: React.FC<FriendModalProps> = ({ isOpen, onClose }) => {
   const fetchFriendList = async () => {
     try {
       setIsLoadingFriends(true);
+      console.log("친구 목록 로딩 시작...");
       const friends = await getFriendList();
+      console.log("받은 친구 목록 데이터:", friends);
       setFriendList(friends);
+      console.log("친구 목록 상태 업데이트 완료:", friends.length);
     } catch (error) {
       console.error("친구 목록을 불러오는데 실패했습니다:", error);
       // toast.error("친구 목록을 불러오는데 실패했습니다.");
