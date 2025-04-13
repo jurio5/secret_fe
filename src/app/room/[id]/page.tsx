@@ -391,7 +391,7 @@ export default function RoomPage() {
         }
         
         // 플레이어 목록이 완전하면 업데이트, 그렇지 않으면 기존 목록 유지
-        if (Array.isArray(status.players)) {
+        if (status.players) {
           // 1. status.players가 비어있으면 기존 목록 유지
           if (status.players.length === 0 && players.length > 0) {
             console.log("빈 플레이어 목록 수신, 기존 목록 유지");
@@ -409,9 +409,9 @@ export default function RoomPage() {
             // 플레이어 정보 업데이트만 적용 (새 플레이어 추가나 목록 교체는 안 함)
             setPlayers(prevPlayers => {
               return prevPlayers.map(player => {
-                // 현재 수신된 목록에서 매칭되는 플레이어 찾기
+                // 현재 수신된 목록에서 매칭되는 플레이어 찾기 - id가 정확히 일치하는 경우만 업데이트
                 const updatedPlayer = status.players.find((p: any) => 
-                  String(p.id) === player.id
+                  String(p.id) === String(player.id)
                 );
                 
                 // 업데이트된 정보가 있으면 병합, 없으면 기존 정보 유지
@@ -434,8 +434,8 @@ export default function RoomPage() {
             }));
             
             // 현재 사용자가 수신된 목록에 없으면 추가
-            if (currentUser && !formattedPlayers.some((p: PlayerProfile) => p.id === currentUser.id.toString())) {
-              const currentUserInPrevList = players.find((p: PlayerProfile) => p.id === currentUser.id.toString());
+            if (currentUser && !formattedPlayers.some((p: PlayerProfile) => String(p.id) === String(currentUser.id))) {
+              const currentUserInPrevList = players.find((p: PlayerProfile) => String(p.id) === String(currentUser.id));
               
               if (currentUserInPrevList) {
                 formattedPlayers.push(currentUserInPrevList);
@@ -444,6 +444,8 @@ export default function RoomPage() {
             }
             
             setPlayers(formattedPlayers);
+            console.log("방 상태 업데이트: 플레이어 목록 초기화");
+            console.log("상태 채널에서 초기 플레이어 목록 설정:", formattedPlayers);
           }
         }
       } catch (e) {
