@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AppLayout from "@/components/common/AppLayout";
 import client from "@/lib/backend/client";
 import { components } from "@/lib/backend/apiV1/schema";
-import { subscribe, unsubscribe, publish, reconnectWebSocket } from "@/lib/backend/stompClient";
+import { subscribe, unsubscribe, publish, reconnectWebSocket, isConnected as isWebSocketConnected } from "@/lib/backend/stompClient";
 import Toast, { ToastProps } from "@/components/common/Toast";
 import { FaCrown, FaUsers, FaDoorOpen, FaInfoCircle, FaComments, FaCheckCircle } from "react-icons/fa";
 
@@ -67,6 +67,17 @@ function RoomContent() {
   
   // 채팅 관련 상태
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const chatMessagesRef = useRef<ChatMessage[]>([]);
+  
+  // 웹소켓 구독 ID 저장용 Ref
+  const subscriptions = useRef<string[]>([]);
+  
+  // 모든 구독 해제 함수
+  const unsubscribeAll = useCallback(() => {
+    console.log("모든 웹소켓 구독 해제");
+    subscriptions.current.forEach(subId => unsubscribe(subId));
+    subscriptions.current = [];
+  }, []);
   
   // 플레이어 목록이 변경될 때 방 정보의 currentPlayers 자동 업데이트
   useEffect(() => {
@@ -152,11 +163,14 @@ function RoomContent() {
   };
   
   // 웹소켓 구독 설정
-  const setupWebSocket = () => {
-    console.log("웹소켓 구독 설정 시작:", roomId);
+  const setupWebSocket = useCallback(() => {
+    console.log("웹소켓 설정 시작...");
+    
+    // 기존 구독 해제 (중복 방지)
+    unsubscribeAll();
     
     // 연결이 끊어진 경우 재연결 시도
-    if (!isConnected) {
+    if (!isWebSocketConnected()) {
       reconnectWebSocket();
     }
     
@@ -290,9 +304,6 @@ function RoomContent() {
       }
     });
     
-    // 기존 플레이어 목록 구독 제거 (백엔드에서 사용되지 않음)
-    // subscribe(`/topic/room/${roomId}/players`, (data) => { ... });
-    
     // 방 상태 구독
     subscribe(`/topic/room/${roomId}/status`, (message) => {
       try {
@@ -370,8 +381,6 @@ function RoomContent() {
     
     // 채팅 메시지 구독
     subscribe(`/topic/room/chat/${roomId}`, (message) => {
-      console.log("채팅 메시지 수신:", message);
-      
       try {
         // 문자열이면 파싱
         const parsedMessage = typeof message === 'string' ? JSON.parse(message) : message;
@@ -404,21 +413,30 @@ function RoomContent() {
     });
     
     setIsConnected(true);
-  };
+    console.log("웹소켓 구독 설정 완료");
+  }, [roomId, currentUser, players, room, chatMessages, router, unsubscribeAll]);
   
   // 방 입장 처리
-  const joinRoom = async () => {
+  const joinRoom = useCallback(async () => {
     if (!currentUser) return;
     
     try {
       console.log("방 입장 시도:", roomId, currentUser);
+      
+      // 웹소켓 연결 확인 후 재연결 시도
+      if (!isWebSocketConnected()) {
+        console.log("웹소켓 연결 시도...");
+        reconnectWebSocket();
+        // 연결 설정 대기
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
       
       // 방 입장 API 호출
       await client.POST(`/api/v1/rooms/{roomId}/join`, {
         params: { path: { roomId: parseInt(roomId) } }
       });
       
-      // 입장 메시지 발행은 한 번만
+      // 입장 이벤트 발행
       publish(`/app/room/join/${roomId}`, {
         roomId: parseInt(roomId),
         playerId: currentUser.id,
@@ -442,6 +460,9 @@ function RoomContent() {
         duration: 2000
       });
       
+      // 웹소켓 구독 설정
+      setupWebSocket();
+      
       // 방 상태 정보 요청 (플레이어 목록 포함)
       setTimeout(() => {
         publish(`/app/room/status/${roomId}`, {
@@ -449,7 +470,7 @@ function RoomContent() {
           roomId: parseInt(roomId),
           timestamp: Date.now()
         });
-      }, 300);
+      }, 500);
       
     } catch (error) {
       console.error("방 입장에 실패했습니다:", error);
@@ -459,10 +480,10 @@ function RoomContent() {
         duration: 3000
       });
     }
-  };
+  }, [currentUser, roomId, setupWebSocket, isWebSocketConnected, reconnectWebSocket]);
   
   // 방 나가기 처리
-  const leaveRoom = async () => {
+  const leaveRoom = useCallback(async () => {
     if (!currentUser) return;
     
     try {
@@ -516,6 +537,9 @@ function RoomContent() {
         };
       });
       
+      // 웹소켓 구독 해제
+      unsubscribeAll();
+      
       // 로비로 이동
       router.push('/lobby');
       
@@ -534,7 +558,7 @@ function RoomContent() {
         duration: 3000
       });
     }
-  };
+  }, [roomId, currentUser, publish, setPlayers, setRoom, unsubscribeAll, router, setToast]);
   
   // 준비 상태 토글
   const toggleReady = async () => {
@@ -905,9 +929,7 @@ function RoomContent() {
     // 컴포넌트 언마운트 시 정리
     return () => {
       // 웹소켓 구독 해제
-      unsubscribe(`/topic/room/${roomId}`);
-      unsubscribe(`/topic/room/${roomId}/status`);
-      unsubscribe(`/topic/room/chat/${roomId}`);
+      unsubscribeAll();
     };
   }, [roomId]);
   
@@ -1062,7 +1084,6 @@ function RoomContent() {
     </div>
   );
 }
-
 export default function RoomPage() {
   return (
     <AppLayout showBeforeUnloadWarning={true} showHeader={false}>
