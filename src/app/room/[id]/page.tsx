@@ -67,7 +67,6 @@ function RoomContent() {
   
   // 채팅 관련 상태
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const chatMessagesRef = useRef<ChatMessage[]>([]);
   
   // 플레이어 목록이 변경될 때 방 정보의 currentPlayers 자동 업데이트
   useEffect(() => {
@@ -154,6 +153,13 @@ function RoomContent() {
   
   // 웹소켓 구독 설정
   const setupWebSocket = () => {
+    console.log("웹소켓 구독 설정 시작:", roomId);
+    
+    // 연결이 끊어진 경우 재연결 시도
+    if (!isConnected) {
+      reconnectWebSocket();
+    }
+    
     // 방 정보 업데이트 구독
     subscribe(`/topic/room/${roomId}`, (data) => {
       console.log("방 정보 업데이트:", data);
@@ -352,7 +358,10 @@ function RoomContent() {
             duration: 2000
           });
           
-          // 게임 시작 상태 유지 (게임 로직을 여기에 추가하거나 다른 페이지로 이동)
+          // 게임 페이지로 리다이렉션
+          setTimeout(() => {
+            router.push(`/game/${roomId}`);
+          }, 1500);
         }
       } catch (error) {
         console.error("방 상태 처리 오류:", error);
@@ -362,15 +371,35 @@ function RoomContent() {
     // 채팅 메시지 구독
     subscribe(`/topic/room/chat/${roomId}`, (message) => {
       console.log("채팅 메시지 수신:", message);
-      console.log("채팅 메시지 타입:", typeof message);
-      console.log("채팅 메시지 JSON:", JSON.stringify(message, null, 2));
-      console.log("현재 메시지 목록 길이:", chatMessagesRef.current.length);
       
       try {
-        // 메시지 처리 및 추가
-        updateChatMessages(message);
+        // 문자열이면 파싱
+        const parsedMessage = typeof message === 'string' ? JSON.parse(message) : message;
+        
+        // 중복 처리를 위한 ID 생성
+        const msgId = parsedMessage.id || 
+          `${parsedMessage.senderId}-${parsedMessage.timestamp}-${Math.random().toString(36).substring(2, 5)}`;
+        
+        // UI에 표시될 상태값에서 중복 체크
+        const isDuplicate = chatMessages.some(msg => 
+          (msg.id === msgId) || 
+          (msg.timestamp === parsedMessage.timestamp && 
+          msg.content === parsedMessage.content && 
+          msg.senderId === parsedMessage.senderId)
+        );
+        
+        if (!isDuplicate) {
+          const messageWithId = {
+            ...parsedMessage,
+            id: msgId,
+            avatarUrl: parsedMessage.avatarUrl || DEFAULT_AVATAR
+          };
+          
+          // 상태만 업데이트 (ref 사용 제거)
+          setChatMessages(prev => [...prev, messageWithId]);
+        }
       } catch (error) {
-        console.error("채팅 메시지 처리 중 오류:", error);
+        console.error("채팅 메시지 처리 오류:", error);
       }
     });
     
@@ -389,16 +418,7 @@ function RoomContent() {
         params: { path: { roomId: parseInt(roomId) } }
       });
       
-      // 입장 메시지 발행
-      publish(`/app/room/chat/${roomId}`, {
-        type: "SYSTEM",
-        content: `${currentUser.nickname}님이 입장했습니다.`,
-        senderId: "system",
-        senderName: "System",
-        timestamp: Date.now()
-      });
-      
-      // 입장 이벤트 발행 - JOIN 타입 메시지로 발행
+      // 입장 메시지 발행은 한 번만
       publish(`/app/room/join/${roomId}`, {
         roomId: parseInt(roomId),
         playerId: currentUser.id,
@@ -413,55 +433,6 @@ function RoomContent() {
         location: "IN_ROOM",
         roomId: parseInt(roomId),
         timestamp: Date.now()
-      });
-      
-      // 직접 플레이어 목록에 자신 추가 (초기 상태 처리)
-      const newPlayer = {
-        id: currentUser.id.toString(),
-        nickname: currentUser.nickname,
-        avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR,
-        isOwner: room?.ownerId === currentUser.id,
-        isReady: false
-      };
-      
-      console.log("플레이어 목록에 자신 추가 시도:", newPlayer);
-      console.log("현재 플레이어 목록:", players);
-      
-      setPlayers(prev => {
-        const existingPlayer = prev.find(p => p.id === currentUser.id.toString());
-        if (existingPlayer) {
-          console.log("이미 플레이어 목록에 있음:", existingPlayer);
-          return prev;
-        }
-        
-        const updatedPlayers = [...prev, newPlayer];
-        console.log("업데이트된 플레이어 목록:", updatedPlayers);
-        return updatedPlayers;
-      });
-      
-      // Room 객체의 players 목록과 currentPlayers 값 함께 업데이트
-      setRoom(prev => {
-        if (!prev) return prev;
-        
-        // 이미 players 목록에 있는지 확인
-        const playerId = currentUser.id;
-        let playerIds = prev.players || [];
-        
-        if (!playerIds.includes(playerId)) {
-          playerIds = [...playerIds, playerId];
-        }
-        
-        console.log("업데이트된 룸 정보:", { 
-          ...prev,
-          players: playerIds,
-          currentPlayers: playerIds.length 
-        });
-        
-        return {
-          ...prev,
-          players: playerIds, // players ID 목록 업데이트
-          currentPlayers: playerIds.length // 플레이어 수 업데이트
-        };
       });
       
       // 성공 메시지
@@ -684,49 +655,21 @@ function RoomContent() {
       content: message,
       senderId: currentUser.id.toString(),
       senderName: currentUser.nickname,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR
     };
     
     // 서버로 채팅 메시지 발행
     publish(`/app/room/chat/${roomId}`, chatMessage);
     
-    // 메시지를 바로 화면에 표시 (옵티미스틱 업데이트)
-    updateChatMessages({
+    // 중복 방지를 위한 ID 추가
+    const messageWithId = {
       ...chatMessage,
-      avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR
-    });
-  };
-  
-  // 채팅 메시지 상태 업데이트 함수
-  const updateChatMessages = (newMessage: ChatMessage) => {
-    // 중복 메시지 검사 (ref로 저장된 최신 메시지 기준)
-    const isDuplicate = chatMessagesRef.current.some(existingMsg => 
-      existingMsg.timestamp === newMessage.timestamp && 
-      existingMsg.content === newMessage.content &&
-      existingMsg.senderId === newMessage.senderId
-    );
-    
-    // 중복 메시지면 무시
-    if (isDuplicate) {
-      console.log("중복 메시지 무시:", newMessage);
-      return;
-    }
-    
-    // 메시지에 고유 ID 추가
-    const messageWithId: ChatMessage = {
-      ...newMessage,
-      id: newMessage.id || `${newMessage.senderId}-${newMessage.timestamp}-${Math.random().toString(36).substr(2, 5)}`,
-      avatarUrl: newMessage.avatarUrl || DEFAULT_AVATAR
+      id: `${chatMessage.senderId}-${chatMessage.timestamp}-${Math.random().toString(36).substr(2, 5)}`
     };
     
-    console.log("새 메시지 추가:", messageWithId);
-    
-    // 상태와 ref 모두 업데이트
-    setChatMessages(prev => {
-      const updated = [...prev, messageWithId];
-      chatMessagesRef.current = updated; // ref도 함께 업데이트
-      return updated;
-    });
+    // 메시지를 바로 화면에 표시 (옵티미스틱 업데이트)
+    setChatMessages(prev => [...prev, messageWithId]);
   };
   
   // 방에 입장할 때 주기적으로 방 상태 및 플레이어 목록 요청
@@ -836,8 +779,24 @@ function RoomContent() {
         // 웹소켓 구독 설정
         setupWebSocket();
         
-        // 방 입장 처리
+        // 웹소켓이 연결됐는지 확인하는 Promise 추가
+        const waitForWebSocketConnection = () => {
+          return new Promise((resolve) => {
+            const checkConnection = () => {
+              if (isConnected) {
+                resolve(true);
+              } else {
+                setTimeout(checkConnection, 100);
+              }
+            };
+            checkConnection();
+          });
+        };
+        
+        // 방 입장 처리 - 웹소켓 연결 확인 후
         if (userData && roomData) {
+          // 웹소켓 연결 후 방 입장
+          await waitForWebSocketConnection();
           await joinRoom();
           
           // 방장 여부 확인
@@ -856,7 +815,6 @@ function RoomContent() {
           
           console.log("초기 채팅 메시지 추가:", initialMessage);
           setChatMessages([initialMessage]);
-          chatMessagesRef.current = [initialMessage]; // ref도 함께 초기화
           
           // 플레이어 목록 초기화 - 자신을 포함한 목록 생성
           if (roomData.players && roomData.players.length > 0) {
