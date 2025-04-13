@@ -65,17 +65,27 @@ const translateSubCategory = (subCategory?: string): string => {
   return subCategories[subCategory] || subCategory;
 };
 
+interface PlayerProfile {
+  id: number;
+  name: string;
+  nickname: string;
+  isOwner: boolean | null;
+  isReady: boolean;
+  avatarUrl: string;
+}
+
 export default function RoomPage() {
   const params = useParams();
   const roomId = params.id as string;
   const [room, setRoom] = useState<RoomResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [players, setPlayers] = useState<any[]>([]);
+  const [players, setPlayers] = useState<PlayerProfile[]>([]);
   const [isOwner, setIsOwner] = useState<boolean>(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isReady, setIsReady] = useState<boolean>(false);
+  const [gameStatus, setGameStatus] = useState<string>('WAITING');
   const [activeTab, setActiveTab] = useState<'players' | 'chat'>('players');
   
   // 플레이어 목록 초기화 여부 추적
@@ -273,28 +283,77 @@ export default function RoomPage() {
     });
     
     // 방 상태 구독 추가 - 다른 사용자들의 상태 변화를 수신
-    subscribe(`/topic/room/${roomId}/status`, (data) => {
-      console.log("방 상태 업데이트 수신:", data);
-      
-      // 수신한 데이터로 플레이어 목록 업데이트
-      if (data.players && Array.isArray(data.players)) {
-        // 현재 사용자 정보를 유지하면서 플레이어 목록 업데이트
-        setPlayers(data.players);
-        
-        // 현재 사용자의 준비 상태 확인 및 업데이트
-        if (currentUser) {
-          const currentUserPlayer = data.players.find(
-            (player: {id: string}) => player.id === currentUser.id.toString()
-          );
-          if (currentUserPlayer) {
-            setIsReady(!!currentUserPlayer.isReady);
+    subscribe(`/topic/room/${roomId}/status`, (message) => {
+      try {
+        const status = JSON.parse(message.body);
+        console.log(`방 상태 업데이트:`, status);
+
+        // 플레이어 목록 처리 개선
+        setPlayers(prevPlayers => {
+          // 새로운 플레이어 목록
+          const newPlayers = status.players || [];
+          
+          // 플레이어 목록이 비어있고 이전에 플레이어가 있었다면 유지
+          if (newPlayers.length === 0 && prevPlayers.length > 0) {
+            console.log("빈 플레이어 목록 수신됨, 현재 플레이어 유지", prevPlayers);
+            return prevPlayers;
           }
+          
+          // 기존 플레이어를 ID 기준으로 맵으로 변환
+          const prevPlayersMap = new Map(prevPlayers.map(p => [p.id, p]));
+          
+          // 새 플레이어 목록과 기존 목록 병합
+          const mergedPlayers: PlayerProfile[] = [];
+          
+          // 새 플레이어 목록의 각 플레이어 처리
+          newPlayers.forEach((newPlayer: any) => {
+            const playerId = typeof newPlayer.id === 'string' ? newPlayer.id : String(newPlayer.id);
+            // 기존 목록에 있는지 확인
+            const existingPlayer = prevPlayersMap.get(playerId);
+            if (existingPlayer) {
+              // 있으면 정보 업데이트하되 기존 정보도 보존
+              mergedPlayers.push({...existingPlayer, ...newPlayer});
+              prevPlayersMap.delete(playerId); // 처리됨 표시
+            } else {
+              // 없으면 새로 추가
+              mergedPlayers.push(newPlayer as PlayerProfile);
+            }
+          });
+          
+          // 현재 사용자가 새 목록에 없으면 추가
+          if (currentUser && !mergedPlayers.some(p => p.id === currentUser.id.toString())) {
+            const currentPlayerInPrevList = prevPlayers.find(p => p.id === currentUser.id.toString());
+            if (currentPlayerInPrevList) {
+              console.log("현재 사용자가 새 목록에 없어 추가됨:", currentPlayerInPrevList);
+              mergedPlayers.push(currentPlayerInPrevList);
+            }
+          }
+          
+          console.log("병합된 플레이어 목록:", mergedPlayers);
+          
+          // 방 정보 업데이트
+          if (status.room && status.room.id === roomId) {
+            // 플레이어 수가 다른 경우 방 정보 업데이트
+            // 필요한 경우에만 currentPlayers 값 업데이트
+            setRoom(prevRoom => {
+              if (!prevRoom) return status.room;
+              return {
+                ...prevRoom,
+                ...status.room,
+                currentPlayers: Math.max(mergedPlayers.length, status.room.currentPlayers || 0)
+              };
+            });
+          }
+          
+          return mergedPlayers;
+        });
+        
+        // 게임 상태 업데이트
+        if (status.gameStatus) {
+          setGameStatus(status.gameStatus);
         }
-      }
-      
-      // 방 정보 업데이트
-      if (data.room) {
-        setRoom(prevRoom => ({ ...prevRoom, ...data.room }));
+      } catch (e) {
+        console.error("방 상태 업데이트 메시지 처리 오류:", e);
       }
     });
     
@@ -392,7 +451,22 @@ export default function RoomPage() {
       if (!players.some(p => p.id === currentUser.id.toString())) {
         // setState 콜백을 사용하여 상태 업데이트 후 브로드캐스트
         setPlayers(prevPlayers => {
-          const updatedPlayers = [...prevPlayers, newPlayer];
+          // 내가 방금 추가된 플레이어인지 확인
+          const updatedPlayers = [...prevPlayers];
+          const existingIndex = updatedPlayers.findIndex(p => p.id === currentUser.id.toString());
+          
+          // 없으면 추가
+          if (existingIndex === -1) {
+            updatedPlayers.push(newPlayer);
+          } else {
+            // 있으면 정보 업데이트
+            updatedPlayers[existingIndex] = {
+              ...updatedPlayers[existingIndex],
+              ...newPlayer
+            };
+          }
+          
+          console.log("방 입장 후 플레이어 목록:", updatedPlayers);
           
           // 상태가 업데이트된 후 지연 시간 증가하여 브로드캐스트
           setTimeout(() => {
@@ -407,7 +481,7 @@ export default function RoomPage() {
               });
               console.log("방 입장 후 업데이트된 플레이어 목록 브로드캐스트:", updatedPlayers);
             }
-          }, 500); // 지연 시간 증가
+          }, 500);
           
           return updatedPlayers;
         });
