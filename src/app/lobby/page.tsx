@@ -43,9 +43,21 @@ type RoomResponse = {
   status?: string;
   ownerId?: number;
   ownerNickname?: string;
-  currentParticipants?: number;
-  maxParticipants?: number;
+  currentParticipants?: number; // 백엔드의 currentPlayers와 매핑
+  maxParticipants?: number;     // 백엔드의 capacity와 매핑
   createdAt?: string;
+  difficulty?: string;          // 난이도 추가
+  mainCategory?: string;        // 메인 카테고리 추가
+  subCategory?: string;         // 서브 카테고리 추가
+  questionCount?: number;       // 문제 수 추가
+  
+  // 백엔드 스키마와 일치시키기 위한 필드
+  capacity?: number;            // 최대 참가자 수 (maxParticipants와 동일)
+  currentPlayers?: number;      // 현재 참가자 수 (currentParticipants와 동일)
+  isPrivate?: boolean;          // 비공개 방 여부
+  password?: string;           // 비밀번호
+  players?: number[];          // 참가자 ID 목록
+  readyPlayers?: number[];     // 준비 완료 플레이어 ID 목록
 }
 
 // API 응답 타입
@@ -296,6 +308,7 @@ function LobbyContent({
       }
 
       if (res.data?.data) {
+        console.log('로드된 룸 정보:', res.data.data);
         setRooms(res.data.data);
       } else {
         setRooms([]);
@@ -1337,29 +1350,81 @@ function LobbyContent({
                 rooms.map((room) => (
                   <div 
                     key={room.id} 
-                    className="bg-gray-700/60 border border-gray-600 rounded-xl p-4 hover:border-blue-500 transition-colors cursor-pointer"
+                    className="bg-gray-800 border border-gray-700 rounded-xl p-4 hover:border-blue-500 transition-colors cursor-pointer shadow-md"
                     onClick={() => {
                       if (room.id) {
+                        // 방 입장 시 의도적 네비게이션 플래그 설정
+                        localStorage.setItem('intentional_navigation', 'true');
                         window.location.href = `/room/${room.id}`;
                       } else {
                         alert("잘못된 방 정보입니다.");
                       }
                     }}
                   >
-                    <div className="flex justify-between items-center mb-2">
-                      <div className="text-xs uppercase tracking-wider text-blue-400">
-                        {room.status || "대기중"}
+                    <div className="flex justify-between items-center mb-3">
+                      <div className="text-xs uppercase tracking-wider text-blue-400 font-semibold">
+                        {room.status === "WAITING" ? "WAITING" : room.status || "대기중"}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                      <div className="flex items-center">
+                        <div className="w-2 h-2 bg-green-400 rounded-full mr-1"></div>
                         <span className="text-xs text-gray-300">
-                          {room.currentParticipants || 0}/{room.maxParticipants || 5}
+                          {room.currentParticipants || room.currentPlayers || 0}/{room.maxParticipants || room.capacity || 5}
                         </span>
                       </div>
                     </div>
-                    <h3 className="font-medium text-white mb-2">{room.title}</h3>
-                    <div className="text-xs text-gray-400 mb-3">방장: {room.ownerNickname || "퀴즐"}</div>
-                    <div className="text-xs text-gray-300">생성: {new Date(room.createdAt || Date.now()).toLocaleString()}</div>
+                    
+                    <h3 className="font-medium text-white text-lg mb-1">{room.title}</h3>
+                    
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <div className="text-xs bg-purple-900/50 text-purple-300 px-2 py-1 rounded-md flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                        {room.ownerNickname || "퀴즐"}
+                      </div>
+                      
+                      {room.difficulty && (
+                        <div className="text-xs bg-indigo-900/50 text-indigo-300 px-2 py-1 rounded-md flex items-center">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          {room.difficulty}
+                        </div>
+                      )}
+                      
+                      {room.questionCount && (
+                        <div className="text-xs bg-blue-900/50 text-blue-300 px-2 py-1 rounded-md flex items-center">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          문제 {room.questionCount}개
+                        </div>
+                      )}
+                    </div>
+                    
+                    {(room.mainCategory || room.subCategory) && (
+                      <div className="text-xs bg-green-900/50 text-green-300 px-2 py-1 rounded-md inline-flex items-center mb-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                        </svg>
+                        {room.mainCategory && `${room.mainCategory}`}
+                        {room.mainCategory && room.subCategory && ' > '}
+                        {room.subCategory && `${room.subCategory}`}
+                      </div>
+                    )}
+                    
+                    <div className="text-xs bg-gray-800/80 text-gray-400 px-2 py-1 rounded-md inline-flex items-center mt-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      최근 활동: {new Date(room.createdAt || Date.now()).toLocaleString('ko-KR', {
+                        year: 'numeric',
+                        month: 'numeric',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </div>
                   </div>
                 ))
               ) : (
@@ -1379,8 +1444,8 @@ function LobbyContent({
               <div className="flex items-center">
                 <div className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-400' : 'bg-gray-400'}`}></div>
                 <span className="text-sm text-gray-300">{activeUsers.length}명 접속 중</span>
-              </div>
-            </div>
+                        </div>
+                        </div>
             
             <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
               {activeUsers.length > 0 ? (
@@ -1408,9 +1473,9 @@ function LobbyContent({
                       ) : (
                         <div className="w-full h-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white font-medium">
                           {user.nickname.charAt(0).toUpperCase()}
-                        </div>
+                      </div>
                       )}
-                    </div>
+                        </div>
                     <div className="flex-grow">
                       <div className="text-sm text-white font-medium flex items-center">
                         {user.nickname}
@@ -1427,6 +1492,8 @@ function LobbyContent({
                             className="text-xs px-1.5 py-0.5 bg-blue-900/30 text-blue-400 rounded-md hover:bg-blue-900/50"
                             onClick={(e) => {
                               e.stopPropagation();
+                              // 방 입장 시 의도적 네비게이션 플래그 설정
+                              localStorage.setItem('intentional_navigation', 'true');
                               window.location.href = `/room/${user.roomId}`;
                             }}
                           >
@@ -2018,6 +2085,7 @@ function LobbyContent({
                   setShowCreateRoomModal(false);
                   
                   // 생성된 방으로 이동
+                  localStorage.setItem('intentional_navigation', 'true');
                   window.location.href = `/room/${roomId}`;
                 }
               } catch (error) {
