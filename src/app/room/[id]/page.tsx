@@ -769,26 +769,63 @@ function RoomContent() {
     const initData = async () => {
       setLoading(true);
       
+      // 로딩 타임아웃 설정 (10초)
+      const loadingTimeout = setTimeout(() => {
+        console.log("방 정보 로딩 타임아웃 발생");
+        setLoading(false);
+        setError("방 정보를 불러오는데 시간이 너무 오래 걸립니다. 새로고침 해주세요.");
+      }, 10000);
+      
       try {
+        console.log("방 정보 로딩 시작");
+        
         // 방 정보 가져오기
         const roomData = await fetchRoomData();
+        console.log("방 정보 로딩 완료:", roomData);
+        
+        if (!roomData) {
+          throw new Error("방 정보를 가져오지 못했습니다.");
+        }
         
         // 사용자 정보 가져오기
         const userData = await fetchCurrentUser();
+        console.log("사용자 정보 로딩 완료:", userData);
+        
+        if (!userData) {
+          throw new Error("사용자 정보를 가져오지 못했습니다.");
+        }
         
         // 웹소켓 구독 설정
+        console.log("웹소켓 구독 설정 시작");
         setupWebSocket();
         
-        // 웹소켓이 연결됐는지 확인하는 Promise 추가
+        // 웹소켓이 연결됐는지 확인하는 Promise 추가 (5초 타임아웃)
         const waitForWebSocketConnection = () => {
-          return new Promise((resolve) => {
+          return new Promise((resolve, reject) => {
+            // 최대 5초 기다림
+            const maxWaitTime = 5000;
+            const startTime = Date.now();
+            
             const checkConnection = () => {
+              // 이미 연결됨
               if (isConnected) {
+                console.log("웹소켓 연결 완료");
                 resolve(true);
-              } else {
-                setTimeout(checkConnection, 100);
+                return;
               }
+              
+              // 타임아웃 체크
+              if (Date.now() - startTime > maxWaitTime) {
+                console.log("웹소켓 연결 타임아웃");
+                // 연결은 안됐지만 계속 진행
+                resolve(false);
+                return;
+              }
+              
+              // 100ms 후 다시 체크
+              setTimeout(checkConnection, 100);
             };
+            
             checkConnection();
           });
         };
@@ -797,7 +834,14 @@ function RoomContent() {
         if (userData && roomData) {
           // 웹소켓 연결 후 방 입장
           await waitForWebSocketConnection();
-          await joinRoom();
+          
+          try {
+            await joinRoom();
+            console.log("방 입장 완료");
+          } catch (joinError) {
+            console.error("방 입장 실패:", joinError);
+            // 방 입장이 실패해도 계속 진행
+          }
           
           // 방장 여부 확인
           setIsOwner(roomData.ownerId === userData.id);
@@ -847,9 +891,12 @@ function RoomContent() {
         }
       } catch (error) {
         console.error("초기화 중 오류 발생:", error);
-        setError("방 정보를 불러오는데 실패했습니다.");
+        setError(error instanceof Error ? error.message : "방 정보를 불러오는데 실패했습니다.");
       } finally {
+        // 로딩 타임아웃 클리어
+        clearTimeout(loadingTimeout);
         setLoading(false);
+        console.log("초기화 완료, 로딩 상태 해제");
       }
     };
     
