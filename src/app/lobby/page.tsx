@@ -81,8 +81,12 @@ type ActiveUser = {
   status: string;
   avatarUrl?: string;
   location?: string;
-  roomId?: number;
-}
+  roomId?: number | null;
+  // User 타입과 호환되도록 필요한 필드 추가
+  email?: string;
+  sessions?: string[];
+  lastActive?: number;
+};
 
 function LobbyContent() {
   const [rooms, setRooms] = useState<RoomResponse[]>([]);
@@ -763,7 +767,7 @@ function LobbyContent() {
     };
   }, [showNicknameModal, currentUser?.status, currentUser?.nickname]);
 
-  const handleUserClick = async (user: User) => {
+  const handleUserClick = async (user: User | ActiveUser) => {
     // 클릭한 사용자가 현재 사용자와 동일한 경우, 로컬 상태에서 최신 정보 사용
     if (currentUser && user.id === currentUser.id) {
       const userProfile: UserProfile = {
@@ -1034,7 +1038,10 @@ function LobbyContent() {
             avatarUrl: message.avatarUrl || DEFAULT_AVATAR,
             status: message.status || "online",
             location: message.location || "IN_LOBBY",
-            roomId: message.roomId || null
+            roomId: message.roomId || null,
+            email: currentUser?.email,
+            sessions: currentUser?.sessions,
+            lastActive: currentUser?.lastActive
           };
           return [...filtered, user];
         }
@@ -1844,7 +1851,7 @@ function LobbyContent() {
                 return;
               }
               
-              if (!problemCount || isNaN(parseInt(problemCount)) || parseInt(problemCount) < 5 || parseInt(problemCount) > 20) {
+              if (!problemCount || isNaN(parseInt(problemCount.toString())) || parseInt(problemCount.toString()) < 5 || parseInt(problemCount.toString()) > 20) {
                 setRoomCreateError("문제 수는 5-20개 사이로 설정해주세요.");
                 return;
               }
@@ -1860,21 +1867,21 @@ function LobbyContent() {
               
               try {
                 // capacity, problemCount를 숫자로 변환
-                const capacityNum = parseInt(capacity);
-                const problemCountNum = parseInt(problemCount);
+                const capacityNum = parseInt(capacity.toString());
+                const problemCountNum = parseInt(problemCount.toString());
                 
                 // 요청 데이터 준비
                 // Enum 값을 문자열 그대로 전달
                 const requestData = {
                   title,
                   capacity: capacityNum,
-                  difficulty,
-                  mainCategory,
-                  subCategory,
-                  answerType,
+                  difficulty: difficulty as "EASY" | "NORMAL" | "HARD",
+                  mainCategory: mainCategory as "SCIENCE" | "HISTORY" | "LANGUAGE" | "GENERAL_KNOWLEDGE",
+                  subCategory: subCategory as "PHYSICS" | "CHEMISTRY" | "BIOLOGY" | "WORLD_HISTORY" | "KOREAN_HISTORY" | "KOREAN" | "ENGLISH" | "CURRENT_AFFAIRS" | "CULTURE" | "SPORTS",
+                  answerType: answerType as "MULTIPLE_CHOICE" | "TRUE_FALSE",
                   problemCount: problemCountNum,
                   isPrivate,
-                  ...(isPrivate ? { password } : {})
+                  password: isPrivate ? password : undefined
                 };
                 
                 console.log("방 생성 요청 데이터:", requestData);
@@ -1882,7 +1889,7 @@ function LobbyContent() {
                 // client 객체 사용 (baseUrl이 이미 설정되어 있음)
                 const response = await client.POST("/api/v1/rooms", {
                   body: requestData
-                }) as ApiResponse<RoomResponse>;
+                } as any) as ApiResponse<RoomResponse>;
                 
                 console.log("API 응답:", response);
                 
