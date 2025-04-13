@@ -61,6 +61,9 @@ type ApiResponse<T> = {
 // 사용자 ID별 프로필 캐시
 const userProfileCache: Record<number, UserProfile> = {};
 
+// 채팅 메시지를 임시로 저장할 캐시 (웹소켓 연결이 끊겼다 다시 연결되어도 메시지가 유지되도록)
+let lobbyMessageCache: any[] = [];
+
 // 기본 아바타 URL
 const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';
 
@@ -850,17 +853,21 @@ function LobbyContent({
 
   // 채팅 구독 설정
   useEffect(() => {
-    // 초기 시스템 메시지 설정
-    setChatMessages([{
-      type: "SYSTEM",
-      content: "로비 채팅에 연결되었습니다. 안녕하세요! 👋",
-      senderId: "system",
-      senderName: "System",
-      timestamp: Date.now(),
-      roomId: "lobby"
-    }]);
+    // 초기 메시지 설정 (캐시가 비어있을 때만)
+    if (lobbyMessageCache.length === 0) {
+      const initialMessage = {
+        type: "SYSTEM",
+        content: "로비 채팅에 연결되었습니다. 안녕하세요! 👋",
+        senderId: "system",
+        senderName: "System",
+        timestamp: Date.now(),
+        roomId: "lobby"
+      };
+      lobbyMessageCache = [initialMessage];
+    }
     
-    // 여기서는 메시지를 불러오기만 하고 구독은 하지 않음
+    // 캐시된 메시지 불러오기
+    setChatMessages(lobbyMessageCache);
   }, []); // 컴포넌트 마운트 시 한 번만 실행
 
   // 웹소켓 연결 시 채팅 구독 설정
@@ -925,6 +932,9 @@ function LobbyContent({
                         : msg
                     );
                     
+                    // 글로벌 캐시 업데이트
+                    lobbyMessageCache = [...updatedMessages];
+                    
                     return updatedMessages;
                   });
                 }
@@ -955,6 +965,9 @@ function LobbyContent({
           ? newMessages.slice(newMessages.length - maxMessages) 
           : newMessages;
         
+        // 글로벌 캐시 업데이트
+        lobbyMessageCache = [...trimmedMessages];
+        
         return trimmedMessages;
       });
     };
@@ -983,6 +996,9 @@ function LobbyContent({
     
     // 메시지가 변경된 경우만 업데이트
     if (JSON.stringify(updatedMessages) !== JSON.stringify(chatMessages)) {
+      // 글로벌 캐시 업데이트
+      lobbyMessageCache = [...updatedMessages];
+      
       setChatMessages(updatedMessages);
     }
   }, [activeUsers, chatMessages]);
@@ -1090,6 +1106,17 @@ function LobbyContent({
   useEffect(() => {
     // 로비에 진입하면 플래그 제거
     localStorage.removeItem('intentional_navigation');
+  }, []);
+
+  // 사용자가 페이지를 나갈 때 메시지 캐시 클리어
+  useEffect(() => {
+    // 다른 페이지로 이동할 때 메시지 캐시를 클리어
+    return () => {
+      // 방 입장이 아닌 다른 페이지로 이동할 때만 캐시 클리어
+      if (!localStorage.getItem('intentional_navigation')) {
+        lobbyMessageCache = [];
+      }
+    };
   }, []);
 
   return (
