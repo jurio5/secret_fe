@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FaUsers, FaCrown, FaCheck } from "react-icons/fa";
+import { FaUsers, FaCrown, FaCheck, FaCheckCircle } from "react-icons/fa";
 import { PlayerProfile } from "../../lib/types/room";
 
 // 기본 프로필 이미지 URL
@@ -13,103 +13,95 @@ interface PlayerListProps {
 }
 
 export default function PlayerList({ players, currentUserId }: PlayerListProps) {
+  // 로딩 중 상태 처리 - 플레이어 목록이 빈 배열일 때
+  const isLoading = players.length === 0;
+
   return (
-    <div className="md:col-span-2 bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-6">
-      <h2 className="text-xl font-semibold mb-4 flex items-center">
-        <FaUsers className="mr-2.5 text-indigo-400" />
-        참가자 목록
-        <span className="ml-2.5 px-2 py-0.5 bg-indigo-900/60 text-indigo-300 text-xs rounded-full">
-          {players.length}명
-        </span>
+    <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-6 h-full">
+      <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-indigo-400" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z" />
+        </svg>
+        플레이어 ({players.length})
       </h2>
       
-      {/* 플레이어 목록이 비어있을 때 */}
-      {players.length === 0 && (
-        <div className="p-4 bg-yellow-900/30 border border-yellow-700/40 rounded-lg text-yellow-200 text-sm">
-          플레이어 목록을 불러오는 중입니다...
-        </div>
-      )}
-      
-      {/* 플레이어 목록 */}
       <div className="space-y-3">
-        {players.map((player) => (
-          <PlayerCard 
-            key={player.id} 
-            player={player}
-            isCurrentUser={currentUserId !== null && currentUserId.toString() === player.id}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-interface PlayerCardProps {
-  player: PlayerProfile;
-  isCurrentUser: boolean;
-}
-
-function PlayerCard({ player, isCurrentUser }: PlayerCardProps) {
-  return (
-    <div
-      className={`p-4 rounded-xl flex items-center transition-all ${
-        player.isOwner 
-          ? 'bg-gradient-to-r from-amber-900/40 to-amber-800/30 border border-amber-700/30' 
-          : player.ready 
-            ? 'bg-gradient-to-r from-green-900/40 to-green-800/30 border border-green-700/30' 
-            : 'bg-gradient-to-r from-gray-800/60 to-gray-800/40 border border-gray-700/30'
-      }`}
-    >
-      {/* 프로필 이미지 */}
-      <div className="relative w-14 h-14 rounded-full overflow-hidden bg-gray-700 flex-shrink-0 border-2 border-gray-600/50 shadow-md">
-        {player.profileImage ? (
-          <Image
-            src={player.profileImage}
-            alt={player.nickname || '사용자'}
-            fill
-            className="object-cover"
-            sizes="56px"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-white font-medium bg-gradient-to-br from-blue-500 to-indigo-600">
-            {player.nickname ? player.nickname.charAt(0).toUpperCase() : '?'}
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center h-48 text-gray-400">
+            <div className="animate-pulse mb-3">
+              <svg className="animate-spin h-8 w-8 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+            <p>플레이어 목록을 불러오는 중입니다...</p>
+            <p className="text-xs mt-2 text-gray-500">서버 연결 중... 잠시만 기다려주세요.</p>
           </div>
+        ) : (
+          players.map((player) => (
+            <div 
+              key={player.id} 
+              className={`flex items-center p-3 rounded-lg ${
+                player.id === currentUserId?.toString() 
+                  ? 'bg-indigo-900/40 border border-indigo-700/50' 
+                  : 'bg-gray-800/70'
+              }`}
+            >
+              <div className="w-10 h-10 rounded-full overflow-hidden mr-3 border border-gray-700">
+                {player.profileImage ? (
+                  <img 
+                    src={player.profileImage} 
+                    alt={player.nickname} 
+                    className="w-full h-full object-cover" 
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold">
+                    {player.nickname.charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex-1">
+                <div className="flex items-center">
+                  <span className="font-medium text-white">
+                    {player.nickname}
+                  </span>
+                  {player.isOwner && (
+                    <span className="ml-2 text-yellow-500" title="방장">
+                      <FaCrown />
+                    </span>
+                  )}
+                  {player.id === currentUserId?.toString() && (
+                    <span className="ml-1 px-1.5 py-0.5 bg-indigo-900/60 text-indigo-300 text-xs rounded">
+                      나
+                    </span>
+                  )}
+                </div>
+                
+                <div className="flex items-center text-sm mt-1">
+                  {player.ready ? (
+                    <span className="text-green-400 flex items-center">
+                      <FaCheckCircle className="mr-1" />
+                      준비 완료
+                    </span>
+                  ) : player.isOwner ? (
+                    <span className="text-yellow-400">방장</span>
+                  ) : (
+                    <span className="text-gray-400">대기 중</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))
         )}
         
-        {/* 상태 아이콘 */}
-        {player.isOwner ? (
-          <div className="absolute -bottom-1 -right-1 bg-yellow-500 text-yellow-900 rounded-full w-6 h-6 flex items-center justify-center border-2 border-gray-800 shadow-lg">
-            <FaCrown className="w-3 h-3" />
+        {/* 방에 아무도 없을 때의 대체 메시지 - 실제로는 표시될 일이 거의 없을 것 */}
+        {!isLoading && players.length === 0 && (
+          <div className="text-center py-8 text-gray-400">
+            <p>현재 방에 플레이어가 없습니다.</p>
+            <p className="text-sm mt-2">다른 플레이어들이 입장하기를 기다려주세요.</p>
           </div>
-        ) : player.ready ? (
-          <div className="absolute -bottom-1 -right-1 bg-green-500 text-green-900 rounded-full w-6 h-6 flex items-center justify-center border-2 border-gray-800 shadow-lg">
-            <FaCheck className="w-3 h-3" />
-          </div>
-        ) : null}
-      </div>
-      
-      {/* 플레이어 정보 */}
-      <div className="ml-4 flex-grow">
-        <div className="flex justify-between items-start">
-          <p className="text-white font-medium text-lg">{player.nickname || '익명 사용자'}</p>
-          {/* 현재 사용자 표시 */}
-          {isCurrentUser && (
-            <span className="px-2 py-0.5 bg-blue-900/50 text-blue-400 text-xs rounded-md">나</span>
-          )}
-        </div>
-        <p className="text-gray-400 text-sm mt-1 flex items-center">
-          {player.isOwner 
-            ? <><FaCrown className="text-yellow-500 mr-1.5" /> 방장</> 
-            : player.ready 
-              ? <><FaCheck className="text-green-500 mr-1.5" /> 준비 완료</> 
-              : <span className="flex items-center">
-                  <span className="relative flex h-2 w-2 mr-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                  </span>
-                  준비 중
-                </span>}
-        </p>
+        )}
       </div>
     </div>
   );
