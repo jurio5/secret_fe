@@ -141,7 +141,7 @@ export default function RoomPage() {
       
       if (response.error) {
         console.error("사용자 정보를 가져오는데 실패했습니다:", response.error);
-        return;
+        return null;
       }
       
       if (response.data?.data) {
@@ -153,9 +153,14 @@ export default function RoomPage() {
         if (room && room.ownerId === userData.id) {
           setIsOwner(true);
         }
+        
+        console.log("사용자 정보 반환:", userData.nickname);
+        return userData; // 사용자 정보 반환
       }
+      return null;
     } catch (error) {
       console.error("사용자 정보를 가져오는데 실패했습니다:", error);
+      return null;
     }
   };
 
@@ -327,9 +332,27 @@ export default function RoomPage() {
       
       if (!currentUser) {
         console.log("사용자 정보가 없어 방 입장을 위해 대기합니다.");
-        return; // 사용자 정보가 없으면 방 입장 중단
+        // 최대 3번까지 시도
+        for (let i = 0; i < 3; i++) {
+          console.log(`사용자 정보 로드 재시도 ${i+1}/3...`);
+          // 3초 대기
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          // 사용자 정보 다시 가져오기
+          const userData = await fetchCurrentUser();
+          if (userData) {
+            console.log("사용자 정보 로드 성공:", userData.nickname);
+            break;
+          }
+        }
+        
+        // 여전히 사용자 정보가 없으면 처리 중단
+        if (!currentUser) {
+          console.error("최대 재시도 횟수를 초과했습니다. 방 입장을 취소합니다.");
+          return;
+        }
       }
       
+      console.log("방 입장 API 요청 시작");
       const response = await (client.POST as any)(`/api/v1/rooms/${roomId}/join`, {});
       console.log("방 입장 API 응답:", response);
       
@@ -371,7 +394,7 @@ export default function RoomPage() {
         setPlayers(prevPlayers => {
           const updatedPlayers = [...prevPlayers, newPlayer];
           
-          // 상태가 업데이트된 후 즉시 브로드캐스트
+          // 상태가 업데이트된 후 지연 시간 증가하여 브로드캐스트
           setTimeout(() => {
             if (room) {
               publish(`/app/room/${roomId}/status`, {
@@ -384,13 +407,13 @@ export default function RoomPage() {
               });
               console.log("방 입장 후 업데이트된 플레이어 목록 브로드캐스트:", updatedPlayers);
             }
-          }, 0);
+          }, 500); // 지연 시간 증가
           
           return updatedPlayers;
         });
       } else {
         // 이미 목록에 있는 경우 현재 상태로 브로드캐스트
-        setTimeout(() => broadcastRoomStatus(), 0);
+        setTimeout(() => broadcastRoomStatus(), 500); // 지연 시간 증가
       }
       
       // 서버 데이터와 클라이언트 상태를 동기화하기 위해 방 정보 업데이트
@@ -404,7 +427,7 @@ export default function RoomPage() {
       console.log("방에 입장했습니다. 최종 플레이어 목록:", players);
       
       // 추가 브로드캐스트 (일정 시간 후 한번 더 실행하여 안정성 확보)
-      setTimeout(() => broadcastRoomStatus(), 1000);
+      setTimeout(() => broadcastRoomStatus(), 2000); // 지연 시간 증가
     } catch (error) {
       console.error("방 입장에 실패했습니다:", error);
     }
@@ -658,21 +681,38 @@ export default function RoomPage() {
         await fetchRoomData();
         console.log("방 정보 로드 완료");
         
-        // 사용자 정보 로드
-        await fetchCurrentUser();
-        console.log("사용자 정보 로드 완료");
+        // 사용자 정보 로드 및 반환값 저장
+        const userData = await fetchCurrentUser();
         
-        // 모든 데이터가 로드된 후 방 입장
-        await joinRoom();
-        console.log("방 입장 프로세스 완료");
-        
-        // 일정 시간 후 추가 브로드캐스트로 안정성 확보
-        setTimeout(() => {
-          if (currentUser && room && players.length > 0) {
-            broadcastRoomStatus();
-            console.log("방 입장 후 추가 브로드캐스트 완료");
+        // 사용자 정보가 없으면 재시도 또는 에러 처리
+        if (!userData) {
+          console.log("사용자 정보 로드 실패, 3초 후 재시도...");
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const retryData = await fetchCurrentUser();
+          
+          if (!retryData) {
+            console.error("사용자 정보를 가져오지 못했습니다. 로비로 돌아갑니다.");
+            window.location.href = "/lobby";
+            return;
           }
-        }, 2000);
+        }
+        
+        // 현재 사용자 정보가 있는지 확인 후 방 입장
+        if (currentUser) {
+          console.log("사용자 정보 확인됨:", currentUser.nickname);
+          await joinRoom();
+          console.log("방 입장 프로세스 완료");
+          
+          // 방 상태 정보 브로드캐스트 - 타이밍 증가
+          setTimeout(() => {
+            if (currentUser && room) {
+              broadcastRoomStatus();
+              console.log("방 입장 후 추가 브로드캐스트 완료");
+            }
+          }, 2000);
+        } else {
+          console.error("사용자 정보가 상태에 설정되지 않았습니다.");
+        }
       } catch (error) {
         console.error("방 데이터 로드 또는 입장 중 오류:", error);
       }
@@ -736,10 +776,24 @@ export default function RoomPage() {
         }));
       }
       
+      // 상태 업데이트 후 브로드캐스트를 위한 시간 지연
+      setTimeout(() => {
+        // 플레이어 목록 정보와 함께 방 상태 브로드캐스트
+        publish(`/app/room/${roomId}/status`, {
+          room: {
+            ...room,
+            currentPlayers: 1
+          },
+          players: [newPlayer],
+          timestamp: Date.now()
+        });
+        console.log("강제 플레이어 목록 초기화 후 브로드캐스트 전송");
+      }, 1000);
+      
       playersInitialized.current = true;
       console.log("플레이어 목록 강제 초기화 완료");
     }
-  }, [room, currentUser, players.length]);
+  }, [room, currentUser, players.length, roomId]);
 
   // 주기적으로 방 상태 공유 (60초마다)
   useEffect(() => {
