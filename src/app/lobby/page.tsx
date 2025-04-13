@@ -88,7 +88,13 @@ type ActiveUser = {
   lastActive?: number;
 };
 
-function LobbyContent() {
+function LobbyContent({ 
+  showCreateRoomModal: externalShowCreateRoomModal, 
+  setShowCreateRoomModal: externalSetShowCreateRoomModal 
+}: { 
+  showCreateRoomModal: boolean;
+  setShowCreateRoomModal: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
   const [rooms, setRooms] = useState<RoomResponse[]>([]);
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -103,7 +109,7 @@ function LobbyContent() {
   const [showRankingModal, setShowRankingModal] = useState<boolean>(false);
   const [showFriendModal, setShowFriendModal] = useState<boolean>(false);
   // 방 생성 모달 상태 추가
-  const [showCreateRoomModal, setShowCreateRoomModal] = useState<boolean>(false);
+  const [showCreateRoomModal, setShowCreateRoomModal] = [externalShowCreateRoomModal, externalSetShowCreateRoomModal];
   // 방 생성 관련 상태 추가
   const [isCreatingRoom, setIsCreatingRoom] = useState<boolean>(false);
   const [roomCreateError, setRoomCreateError] = useState<string>("");
@@ -1036,6 +1042,12 @@ function LobbyContent() {
       timestamp: Date.now()
     });
   };
+
+  // 페이지 로드 시 intentional_navigation 플래그 초기화
+  useEffect(() => {
+    // 로비에 진입하면 플래그 제거
+    localStorage.removeItem('intentional_navigation');
+  }, []);
 
   return (
     <div className="container mx-auto px-4 py-8 flex flex-col h-full">
@@ -2082,8 +2094,14 @@ function LobbyContent() {
 }
 
 export default function LobbyPage() {
+  // Modal 상태를 상위 컴포넌트로 끌어올림
+  const [showCreateRoomModal, setShowCreateRoomModal] = useState<boolean>(false);
+  
+  // 모달이 열려있을 때는 beforeunload 경고 비활성화
+  const shouldShowBeforeUnloadWarning = !showCreateRoomModal;
+  
   return (
-    <AppLayout showBeforeUnloadWarning={true} showHomeButton={false} showHeader={false}>
+    <AppLayout showBeforeUnloadWarning={shouldShowBeforeUnloadWarning} showHomeButton={false} showHeader={false}>
       <Suspense
         fallback={
           <div className="flex justify-center items-center min-h-[60vh]">
@@ -2091,7 +2109,10 @@ export default function LobbyPage() {
           </div>
         }
       >
-        <LobbyContent />
+        <LobbyContent 
+          showCreateRoomModal={showCreateRoomModal}
+          setShowCreateRoomModal={setShowCreateRoomModal}
+        />
       </Suspense>
     </AppLayout>
   );
