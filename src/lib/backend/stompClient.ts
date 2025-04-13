@@ -285,7 +285,13 @@ const reconnectWebSocket = () => {
   }
 };
 
+// 웹소켓 연결 상태 확인 함수
+const isConnected = () => {
+  // 단순히 플래그만 확인하는 것이 아니라 실제 STOMP 클라이언트의 상태까지 확인
+  return stompClientConnected && !!stompClient.connected;
+};
+
 stompClient.activate();
 
 export default stompClient;
-export { subscribe, unsubscribe, publish, reconnectWebSocket };
+export { subscribe, unsubscribe, publish, reconnectWebSocket, isConnected };
