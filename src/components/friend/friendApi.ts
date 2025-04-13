@@ -5,6 +5,25 @@ import { fetchWithRetry, fetchWithAuthErrorHandling } from '@/lib/utils/apiUtils
 // API 기본 URL 설정
 const API_BASE_URL = process.env.NEXT_PUBLIC_WAS_HOST || 'https://quizzle.p-e.kr';
 
+// 현재 로그인한 사용자 정보 가져오기
+const getCurrentUser = async () => {
+  try {
+    const response = await fetchWithAuthErrorHandling(
+      () => fetchWithRetry(
+        () => client.GET("/api/v1/members/me", {}),
+        1 // 최대 1번 재시도
+      )
+    );
+    
+    if (response.data?.data) {
+      return response.data.data;
+    }
+  } catch (error) {
+    console.error("현재 사용자 정보를 가져오는데 실패했습니다:", error);
+  }
+  return null;
+};
+
 // 친구 목록 조회
 export const getFriendList = async (): Promise<Friend[]> => {
   try {
@@ -50,6 +69,11 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
     const friendList = await getFriendList();
     const friendIds = friendList.map(friend => friend.memberId);
     
+    // 현재 로그인한 사용자 정보 가져오기
+    const currentUser = await getCurrentUser();
+    const currentUserId = currentUser?.id;
+    console.log('현재 로그인한 사용자 ID:', currentUserId);
+    
     // client 객체를 통한 API 호출 - 타입 캐스팅으로 타입 오류 해결
     const response = await (client as any).GET("/api/v1/members/search", {
       params: {
@@ -79,12 +103,13 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
     
     console.log('검색 결과 데이터:', data);
     
+    // 결과 데이터 필터링 및 변환 전 로깅
+    console.log('필터링 전 검색 결과:', data?.data);
+    
     // 백엔드에서 반환된 데이터를 FriendSearchResult 형식으로 변환
-    return (data?.data || [])
+    const searchResults = (data?.data || [])
       .filter((member: any) => {
-        // 현재 사용자 ID
-        const currentUserId = (window as any).__INITIAL_USER__?.memberId;
-        // 자신 제외
+        // 현재 사용자는 검색 결과에서 제외
         return member.id !== currentUserId;
       })
       .map((member: any) => {
@@ -104,6 +129,11 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
           status: status
         };
       }) as FriendSearchResult[];
+    
+    // 필터링 결과 로깅
+    console.log('필터링 후 검색 결과:', searchResults);
+    
+    return searchResults;
   } catch (error) {
     console.error("사용자 검색에 실패했습니다:", error);
     return [];
@@ -118,6 +148,11 @@ export const searchUserByNicknameWithClient = async (nickname: string): Promise<
     // 현재 친구 목록을 가져옴
     const friendList = await getFriendList();
     const friendIds = friendList.map(friend => friend.memberId);
+    
+    // 현재 로그인한 사용자 정보 가져오기
+    const currentUser = await getCurrentUser();
+    const currentUserId = currentUser?.id;
+    console.log('현재 로그인한 사용자 ID:', currentUserId);
     
     // client 객체를 any로 캐스팅하여 타입 오류 방지
     const response = await (client as any).GET("/api/v1/members/search", {
@@ -150,12 +185,13 @@ export const searchUserByNicknameWithClient = async (nickname: string): Promise<
     
     console.log('검색 결과 데이터:', data);
     
+    // 결과 데이터 필터링 및 변환 전 로깅
+    console.log('필터링 전 검색 결과:', data?.data);
+    
     // 백엔드에서 반환된 데이터를 FriendSearchResult 형식으로 변환
-    return (data?.data || [])
+    const searchResults = (data?.data || [])
       .filter((member: any) => {
-        // 현재 사용자 ID
-        const currentUserId = (window as any).__INITIAL_USER__?.memberId;
-        // 자신 제외
+        // 현재 사용자는 검색 결과에서 제외
         return member.id !== currentUserId;
       })
       .map((member: any) => {
@@ -175,6 +211,11 @@ export const searchUserByNicknameWithClient = async (nickname: string): Promise<
           status: status
         };
       }) as FriendSearchResult[];
+    
+    // 필터링 결과 로깅
+    console.log('필터링 후 검색 결과:', searchResults);
+    
+    return searchResults;
   } catch (error) {
     console.error("사용자 검색에 실패했습니다:", error);
     return [];
