@@ -19,6 +19,8 @@ interface User {
   lastActive: number;
   status: string;
   avatarUrl?: string;
+  location?: string;
+  roomId?: number;
 }
 
 // 프로필 정보 타입
@@ -72,9 +74,19 @@ const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/
 //   avatarUrl?: string;
 // }
 
+// activeUsers 타입 정의 업데이트
+type ActiveUser = {
+  id: number;
+  nickname: string;
+  status: string;
+  avatarUrl?: string;
+  location?: string;
+  roomId?: number;
+}
+
 function LobbyContent() {
   const [rooms, setRooms] = useState<RoomResponse[]>([]);
-  const [activeUsers, setActiveUsers] = useState<User[]>([]);
+  const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
@@ -1003,6 +1015,62 @@ function LobbyContent() {
     setShowFriendModal(!showFriendModal);
   };
 
+  // 메시지 타입에 따른 처리
+  const receiveMessage = (message: any) => {
+    // ... existing code ...
+
+    // 메시지 타입에 따른 처리
+    if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || message.type === "STATUS_UPDATE") {
+      // 사용자 목록 갱신
+      setActiveUsers(prev => {
+        // 기존 사용자 목록에서 해당 사용자 제외
+        const filtered = prev.filter(u => u.id !== parseInt(message.senderId));
+        
+        // 연결 메시지인 경우에만 사용자 추가
+        if (message.type !== "USER_DISCONNECT") {
+          const user: ActiveUser = {
+            id: parseInt(message.senderId),
+            nickname: message.senderName,
+            avatarUrl: message.avatarUrl || DEFAULT_AVATAR,
+            status: message.status || "online",
+            location: message.location || "IN_LOBBY",
+            roomId: message.roomId || null
+          };
+          return [...filtered, user];
+        }
+        
+        return filtered;
+      });
+    }
+
+    // ... existing code ...
+  };
+
+  // WebSocket 초기화에 로비 상태 메시지 구독 추가
+  const initializeWebSocket = async () => {
+    // ... existing code ...
+    
+    // 로비 채팅 메시지 구독
+    subscribe("/topic/lobby/chat", receiveMessage);
+    
+    // 로비 상태 업데이트 메시지 구독
+    subscribe("/topic/lobby/status", receiveMessage);
+    
+    // 로비 사용자 목록 구독 (이 토픽 이름 확인)
+    subscribe("/topic/lobby/users", receiveMessage);
+    
+    // ... existing code ...
+
+    // 연결 성공 시 본인 상태를 로비에 업데이트
+    publish('/app/lobby/status', {
+      type: "STATUS_UPDATE",
+      status: "로비",
+      location: "IN_LOBBY",
+      roomId: null,
+      timestamp: Date.now()
+    });
+  };
+
   return (
     <div className="container mx-auto px-4 py-8 flex flex-col h-full">
       {/* 토스트 메시지 표시 */}
@@ -1158,7 +1226,13 @@ function LobbyContent() {
                   <div 
                     key={room.id} 
                     className="bg-gray-700/60 border border-gray-600 rounded-xl p-4 hover:border-blue-500 transition-colors cursor-pointer"
-                    onClick={() => alert(`방 ${room.id}로 입장하는 기능은 준비 중입니다.`)}
+                    onClick={() => {
+                      if (room.id) {
+                        window.location.href = `/room/${room.id}`;
+                      } else {
+                        alert("잘못된 방 정보입니다.");
+                      }
+                    }}
                   >
                     <div className="flex justify-between items-center mb-2">
                       <div className="text-xs uppercase tracking-wider text-blue-400">
@@ -1225,15 +1299,31 @@ function LobbyContent() {
                         </div>
                       )}
                     </div>
-                    <div>
-                      <div className="text-sm text-white font-medium">
+                    <div className="flex-grow">
+                      <div className="text-sm text-white font-medium flex items-center">
                         {user.nickname}
                         {currentUser && user.id === currentUser.id && (
                           <span className="ml-1 px-1.5 py-0.5 bg-blue-900/30 text-blue-400 text-xs rounded-md">나</span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-400">{user.status}</div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-gray-400">
+                          {user.status === "online" ? "로비" : user.status}
+                        </div>
+                        {user.location === "IN_ROOM" && user.roomId && (
+                          <button 
+                            className="text-xs px-1.5 py-0.5 bg-blue-900/30 text-blue-400 rounded-md hover:bg-blue-900/50"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.location.href = `/room/${user.roomId}`;
+                            }}
+                          >
+                            입장
+                          </button>
+                        )}
+                      </div>
                     </div>
+                    <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="온라인"></div>
                   </div>
                 ))
               ) : (
@@ -1754,8 +1844,8 @@ function LobbyContent() {
                 return;
               }
               
-              if (isNaN(problemCount) || problemCount < 10 || problemCount > 50) {
-                setRoomCreateError("문제 수는 10-50개 사이로 설정해주세요.");
+              if (!problemCount || isNaN(parseInt(problemCount)) || parseInt(problemCount) < 5 || parseInt(problemCount) > 20) {
+                setRoomCreateError("문제 수는 5-20개 사이로 설정해주세요.");
                 return;
               }
               
@@ -1769,21 +1859,35 @@ function LobbyContent() {
               setRoomCreateError("");
               
               try {
+                // capacity, problemCount를 숫자로 변환
+                const capacityNum = parseInt(capacity);
+                const problemCountNum = parseInt(problemCount);
+                
+                // 요청 데이터 준비
+                // Enum 값을 문자열 그대로 전달
+                const requestData = {
+                  title,
+                  capacity: capacityNum,
+                  difficulty,
+                  mainCategory,
+                  subCategory,
+                  answerType,
+                  problemCount: problemCountNum,
+                  isPrivate,
+                  ...(isPrivate ? { password } : {})
+                };
+                
+                console.log("방 생성 요청 데이터:", requestData);
+                
+                // client 객체 사용 (baseUrl이 이미 설정되어 있음)
                 const response = await client.POST("/api/v1/rooms", {
-                  body: {
-                    title,
-                    capacity,
-                    difficulty: difficulty as "EASY" | "NORMAL" | "HARD",
-                    mainCategory: mainCategory as "SCIENCE" | "HISTORY" | "LANGUAGE" | "GENERAL_KNOWLEDGE",
-                    subCategory: subCategory as "PHYSICS" | "CHEMISTRY" | "BIOLOGY" | "WORLD_HISTORY" | "KOREAN_HISTORY" | "KOREAN" | "ENGLISH" | "CURRENT_AFFAIRS" | "CULTURE" | "SPORTS",
-                    answerType: answerType as "MULTIPLE_CHOICE" | "TRUE_FALSE",
-                    problemCount,
-                    isPrivate,
-                    password: isPrivate ? password : undefined
-                  }
+                  body: requestData
                 }) as ApiResponse<RoomResponse>;
                 
+                console.log("API 응답:", response);
+                
                 if (response.error) {
+                  console.error("방 생성 오류:", response.error);
                   setRoomCreateError(response.error.message || "방 생성에 실패했습니다.");
                   return;
                 }
@@ -1801,18 +1905,8 @@ function LobbyContent() {
                   // 방 생성 모달 닫기
                   setShowCreateRoomModal(false);
                   
-                  // 방 페이지로 이동하는 대신 임시 메시지 표시
-                  setToast({
-                    type: "info",
-                    message: `방 ${roomId}번이 생성되었습니다. 입장 기능은 개발 중입니다.`,
-                    duration: 5000
-                  });
-                  
-                  // 방 목록 새로고침
-                  loadRooms();
-                  
-                  // 실제 방 페이지가 개발되면 아래 코드 활성화
-                  // router.push(`/room/${roomId}`);
+                  // 생성된 방으로 이동
+                  window.location.href = `/room/${roomId}`;
                 }
               } catch (error) {
                 console.error("방 생성 중 오류 발생:", error);
@@ -1944,7 +2038,7 @@ function LobbyContent() {
                   name="problemCount" 
                   className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  {[10, 20, 30, 40, 50].map(num => (
+                  {[5, 10, 15, 20].map(num => (
                     <option key={num} value={num}>{num}개</option>
                   ))}
                 </select>
