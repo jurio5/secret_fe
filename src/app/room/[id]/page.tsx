@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import AppLayout from "@/components/common/AppLayout";
 import client from "@/lib/backend/client";
-import { subscribe, unsubscribe, publish } from "@/lib/backend/stompClient";
+import { subscribe, unsubscribe, publish, reconnectWebSocket, isConnected } from "@/lib/backend/stompClient";
 import Image from "next/image";
 import { FaChevronLeft, FaDoorOpen, FaCrown, FaCheck, FaComments, FaUsers, FaInfoCircle, FaPlay } from "react-icons/fa";
 import { RoomResponse, PlayerProfile, RoomStatus, RoomMessageType } from "../../../lib/types/room";
@@ -145,231 +145,282 @@ export default function RoomPage() {
   // 웹소켓 구독 설정
   const setupWebSocket = () => {
     debug("웹소켓 구독 설정", roomId);
+
+    // 먼저 이전 구독이 있다면 정리
+    unsubscribe(`/topic/room/${roomId}`);
+    unsubscribe(`/topic/player/${roomId}`);
+    unsubscribe(`/topic/room/chat/${roomId}`);
+    unsubscribe(`/topic/chat/room/${roomId}`);
+    unsubscribe(`/topic/game/chat/${roomId}`);
     
-    // 방 정보 업데이트 구독
-    subscribe(`/topic/room/${roomId}`, (data) => {
-      debug("방 정보 업데이트 수신", data);
-      
-      // 타입이 있는 경우 (WebSocketRoomMessageResponse 형식)
-      if (data && data.type) {
-        debug(`메시지 타입: ${data.type}`);
-        
-        // room 정보 업데이트 - 기존 방 정보는 유지하고 새로운 속성만 업데이트
-        if (data.type === 'ROOM_UPDATED' || data.type === 'JOIN' || data.type === 'LEAVE') {
-          setRoom(prev => {
-            if (!prev) return data;
-            
-            // 플레이어 수 계산을 위한 처리
-            let updatedCurrentPlayers = prev.currentPlayers;
-            
-            if (data.type === 'JOIN') {
-              // 플레이어 입장 시 +1
-              updatedCurrentPlayers = (prev.currentPlayers || 0) + 1;
-              debug("플레이어 입장", { before: prev.currentPlayers, after: updatedCurrentPlayers });
-            } else if (data.type === 'LEAVE') {
-              // 플레이어 퇴장 시 -1 (0 미만이 되지 않도록)
-              updatedCurrentPlayers = Math.max(0, (prev.currentPlayers || 1) - 1);
-              debug("플레이어 퇴장", { before: prev.currentPlayers, after: updatedCurrentPlayers });
-            } else if (data.currentPlayers !== undefined) {
-              // 직접 currentPlayers 값이 제공되면 사용
-              updatedCurrentPlayers = data.currentPlayers;
-              debug("플레이어 수 직접 업데이트", { before: prev.currentPlayers, after: updatedCurrentPlayers });
-            }
-            
-            // 방 정보와 플레이어 수 업데이트
-            const updated = { 
-              ...prev, 
-              ...data,
-              currentPlayers: updatedCurrentPlayers 
-            };
-            
-            debug("방 정보 업데이트 완료", {
-              id: updated.id,
-              title: updated.title,
-              currentPlayers: updated.currentPlayers,
-              capacity: updated.capacity,
-              owner: updated.ownerId || updated.owner
-            });
-            
-            return updated;
-          });
-          
-          // 방장 정보가 업데이트된 경우, 방장 여부 재확인
-          if ((data.ownerId || data.owner) && currentUserId) {
-            const userIdStr = currentUserId.toString();
-            // ownerId가 없으면 owner 사용
-            const roomOwnerId = data.ownerId || data.owner;
-            const roomOwnerIdStr = roomOwnerId?.toString() || "";
-            const isCurrentUserOwner = userIdStr === roomOwnerIdStr;
-            
-            debug("방장 여부 업데이트 (웹소켓)", {
-              currentUserId: userIdStr,
-              roomOwnerId: roomOwnerIdStr,
-              isOwner: isCurrentUserOwner
-            });
-            
-            setIsOwner(isCurrentUserOwner);
-          }
+    // 웹소켓 연결이 완전히 준비될 때까지 약간의 지연 추가
+    const trySubscribe = (retryCount = 0, maxRetries = 3) => {
+      if (!isConnected()) {
+        if (retryCount < maxRetries) {
+          debug(`웹소켓 연결 대기 중... (${retryCount + 1}/${maxRetries + 1})`);
+          // 500ms 후 재시도
+          setTimeout(() => trySubscribe(retryCount + 1, maxRetries), 500);
+          return;
         }
         
-        // data 필드에 플레이어 목록이 포함되어 있는 경우
-        if (data.data) {
-          try {
-            debug("플레이어 데이터 필드 발견", data.data);
+        // 최대 재시도 횟수 초과
+        debug("웹소켓 연결 실패, 재연결 시도");
+        const reconnected = reconnectWebSocket();
+        if (!reconnected) {
+          debug("웹소켓 재연결 실패, 구독 설정 중단");
+          setError("웹소켓 연결에 실패했습니다. 페이지를 새로고침해주세요.");
+          return false;
+        }
+        
+        // 재연결 후 구독을 위해 약간의 지연
+        setTimeout(() => performSubscriptions(), 1000);
+      } else {
+        performSubscriptions();
+      }
+    };
+    
+    // 실제 구독 로직
+    const performSubscriptions = () => {
+      debug("구독 설정 시작");
+      
+      try {
+        // 방 정보 업데이트 구독
+        subscribe(`/topic/room/${roomId}`, (data) => {
+          debug("방 정보 업데이트 수신", data);
+          
+          // 타입이 있는 경우 (WebSocketRoomMessageResponse 형식)
+          if (data && data.type) {
+            debug(`메시지 타입: ${data.type}`);
             
-            // 문자열인 경우 JSON으로 파싱
-            let playersData;
-            if (typeof data.data === 'string') {
-              try {
-                playersData = JSON.parse(data.data);
-                debug("JSON 파싱된 플레이어 데이터", playersData);
-              } catch (parseError) {
-                console.error("플레이어 데이터 JSON 파싱 실패:", parseError);
-                return;
-              }
-            } else if (Array.isArray(data.data)) {
-              playersData = data.data;
-              debug("배열 형태의 플레이어 데이터", playersData);
-            } else {
-              debug("지원되지 않는 플레이어 데이터 형식", typeof data.data);
-              return;
-            }
-            
-            // 플레이어 데이터가 유효한지 확인
-            if (!Array.isArray(playersData)) {
-              console.warn("플레이어 데이터가 배열이 아닙니다:", playersData);
-              return;
-            }
-            
-            // JOIN, LEAVE 등의 메시지인 경우, 받은 플레이어 목록이 최신 상태임
-            if (playersData.length > 0) {
-              debug(`${playersData.length}명의 플레이어 목록 수신`);
-              
-              // 플레이어 데이터 형식 통일화
-              const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
-                // ID가 숫자면 문자열로 변환
-                const id = typeof player.id === 'number' ? String(player.id) : player.id;
-                
-                // 방장 여부 명확히 확인
-                const isPlayerOwner = player.isOwner === true || 
-                  (room && room.owner === id) ? true : false;
-                
-                // 현재 사용자가 방장인지 확인 및 상태 업데이트
-                if (currentUserId && id === currentUserId.toString() && isPlayerOwner) {
-                  debug("현재 사용자가 방장임", {userId: id, isOwner: isPlayerOwner});
-                  setIsOwner(true);
-                }
-                
-                return {
-                  id,
-                  nickname: player.nickname || player.name || '사용자',
-                  profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
-                  isOwner: isPlayerOwner,
-                  ready: Boolean(player.ready || player.isReady),
-                  status: player.status || "WAITING",
-                  score: player.score || 0
-                };
-              });
-              
-              setPlayers(formattedPlayers);
-              debug("플레이어 목록 업데이트 완료", formattedPlayers);
-              
-              // 플레이어 목록 업데이트 시 방 인원 수도 함께 업데이트
+            // room 정보 업데이트 - 기존 방 정보는 유지하고 새로운 속성만 업데이트
+            if (data.type === 'ROOM_UPDATED' || data.type === 'JOIN' || data.type === 'LEAVE') {
               setRoom(prev => {
-                if (!prev) return prev;
-                return {
-                  ...prev,
-                  currentPlayers: formattedPlayers.length
+                if (!prev) return data;
+                
+                // 플레이어 수 계산을 위한 처리
+                let updatedCurrentPlayers = prev.currentPlayers;
+                
+                if (data.type === 'JOIN') {
+                  // 플레이어 입장 시 +1
+                  updatedCurrentPlayers = (prev.currentPlayers || 0) + 1;
+                  debug("플레이어 입장", { before: prev.currentPlayers, after: updatedCurrentPlayers });
+                } else if (data.type === 'LEAVE') {
+                  // 플레이어 퇴장 시 -1 (0 미만이 되지 않도록)
+                  updatedCurrentPlayers = Math.max(0, (prev.currentPlayers || 1) - 1);
+                  debug("플레이어 퇴장", { before: prev.currentPlayers, after: updatedCurrentPlayers });
+                } else if (data.currentPlayers !== undefined) {
+                  // 직접 currentPlayers 값이 제공되면 사용
+                  updatedCurrentPlayers = data.currentPlayers;
+                  debug("플레이어 수 직접 업데이트", { before: prev.currentPlayers, after: updatedCurrentPlayers });
+                }
+                
+                // 방 정보와 플레이어 수 업데이트
+                const updated = { 
+                  ...prev, 
+                  ...data,
+                  currentPlayers: updatedCurrentPlayers 
                 };
+                
+                debug("방 정보 업데이트 완료", {
+                  id: updated.id,
+                  title: updated.title,
+                  currentPlayers: updated.currentPlayers,
+                  capacity: updated.capacity,
+                  owner: updated.ownerId || updated.owner
+                });
+                
+                return updated;
               });
               
-              // 현재 사용자의 준비 상태 확인
-              if (currentUserId) {
-                const currentPlayer = formattedPlayers.find(
-                  p => p.id === currentUserId.toString()
-                );
-                if (currentPlayer) {
-                  setIsReady(currentPlayer.ready);
-                }
+              // 방장 정보가 업데이트된 경우, 방장 여부 재확인
+              if ((data.ownerId || data.owner) && currentUserId) {
+                const userIdStr = currentUserId.toString();
+                // ownerId가 없으면 owner 사용
+                const roomOwnerId = data.ownerId || data.owner;
+                const roomOwnerIdStr = roomOwnerId?.toString() || "";
+                const isCurrentUserOwner = userIdStr === roomOwnerIdStr;
+                
+                debug("방장 여부 업데이트 (웹소켓)", {
+                  currentUserId: userIdStr,
+                  roomOwnerId: roomOwnerIdStr,
+                  isOwner: isCurrentUserOwner
+                });
+                
+                setIsOwner(isCurrentUserOwner);
               }
             }
-          } catch (error) {
-            console.error("플레이어 목록 처리 중 오류:", error);
-          }
-        }
-        
-        // 게임 상태 업데이트
-        if (data.gameStatus || data.status) {
-          const newStatus = data.gameStatus || data.status;
-          debug("게임 상태 업데이트", newStatus);
-          setGameStatus(newStatus as RoomStatus);
-        }
-      }
-    });
-    
-    // 플레이어 상태 변경 구독
-    subscribe(`/topic/player/${roomId}`, (data) => {
-      debug("플레이어 상태 업데이트", data);
-      
-      if (data && data.id) {
-        // 단일 플레이어 상태 업데이트
-        setPlayers(prevPlayers => {
-          const updatedPlayers = [...prevPlayers];
-          const playerIndex = updatedPlayers.findIndex(p => p.id === data.id);
-          
-          if (playerIndex !== -1) {
-            // 기존 플레이어 정보 유지하면서 새 정보 병합
-            updatedPlayers[playerIndex] = {
-              ...updatedPlayers[playerIndex],
-              nickname: data.nickname || updatedPlayers[playerIndex].nickname,
-              profileImage: data.profileImage || data.avatarUrl || updatedPlayers[playerIndex].profileImage,
-              ready: data.ready !== undefined ? data.ready : data.isReady !== undefined ? data.isReady : updatedPlayers[playerIndex].ready,
-              isOwner: data.isOwner !== undefined ? data.isOwner : updatedPlayers[playerIndex].isOwner,
-              status: data.status || updatedPlayers[playerIndex].status,
-              score: data.score !== undefined ? data.score : updatedPlayers[playerIndex].score
-            };
             
-            // 현재 사용자의 상태가 변경된 경우 isReady 상태도 업데이트
-            if (currentUserId && data.id === currentUserId.toString()) {
-              setIsReady(updatedPlayers[playerIndex].ready);
+            // data 필드에 플레이어 목록이 포함되어 있는 경우
+            if (data.data) {
+              try {
+                debug("플레이어 데이터 필드 발견", data.data);
+                
+                // 문자열인 경우 JSON으로 파싱
+                let playersData;
+                if (typeof data.data === 'string') {
+                  try {
+                    playersData = JSON.parse(data.data);
+                    debug("JSON 파싱된 플레이어 데이터", playersData);
+                  } catch (parseError) {
+                    console.error("플레이어 데이터 JSON 파싱 실패:", parseError);
+                    return;
+                  }
+                } else if (Array.isArray(data.data)) {
+                  playersData = data.data;
+                  debug("배열 형태의 플레이어 데이터", playersData);
+                } else {
+                  debug("지원되지 않는 플레이어 데이터 형식", typeof data.data);
+                  return;
+                }
+                
+                // 플레이어 데이터가 유효한지 확인
+                if (!Array.isArray(playersData)) {
+                  console.warn("플레이어 데이터가 배열이 아닙니다:", playersData);
+                  return;
+                }
+                
+                // JOIN, LEAVE 등의 메시지인 경우, 받은 플레이어 목록이 최신 상태임
+                if (playersData.length > 0) {
+                  debug(`${playersData.length}명의 플레이어 목록 수신`);
+                  
+                  // 플레이어 데이터 형식 통일화
+                  const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
+                    // ID가 숫자면 문자열로 변환
+                    const id = typeof player.id === 'number' ? String(player.id) : player.id;
+                    
+                    // 방장 여부 명확히 확인
+                    const isPlayerOwner = player.isOwner === true || 
+                      (room && room.owner === id) ? true : false;
+                    
+                    // 현재 사용자가 방장인지 확인 및 상태 업데이트
+                    if (currentUserId && id === currentUserId.toString() && isPlayerOwner) {
+                      debug("현재 사용자가 방장임", {userId: id, isOwner: isPlayerOwner});
+                      setIsOwner(true);
+                    }
+                    
+                    return {
+                      id,
+                      nickname: player.nickname || player.name || '사용자',
+                      profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
+                      isOwner: isPlayerOwner,
+                      ready: Boolean(player.ready || player.isReady),
+                      status: player.status || "WAITING",
+                      score: player.score || 0
+                    };
+                  });
+                  
+                  setPlayers(formattedPlayers);
+                  debug("플레이어 목록 업데이트 완료", formattedPlayers);
+                  
+                  // 플레이어 목록 업데이트 시 방 인원 수도 함께 업데이트
+                  setRoom(prev => {
+                    if (!prev) return prev;
+                    return {
+                      ...prev,
+                      currentPlayers: formattedPlayers.length
+                    };
+                  });
+                  
+                  // 현재 사용자의 준비 상태 확인
+                  if (currentUserId) {
+                    const currentPlayer = formattedPlayers.find(
+                      p => p.id === currentUserId.toString()
+                    );
+                    if (currentPlayer) {
+                      setIsReady(currentPlayer.ready);
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error("플레이어 목록 처리 중 오류:", error);
+              }
             }
-          } else if (data.id) {
-            // 새 플레이어 추가
-            const newPlayer: PlayerProfile = {
-              id: data.id,
-              nickname: data.nickname || data.name || '사용자',
-              profileImage: data.profileImage || data.avatarUrl || DEFAULT_PROFILE_IMAGE,
-              isOwner: Boolean(data.isOwner),
-              ready: Boolean(data.ready || data.isReady),
-              status: data.status || "WAITING",
-              score: data.score || 0
-            };
             
-            updatedPlayers.push(newPlayer);
+            // 게임 상태 업데이트
+            if (data.gameStatus || data.status) {
+              const newStatus = data.gameStatus || data.status;
+              debug("게임 상태 업데이트", newStatus);
+              setGameStatus(newStatus as RoomStatus);
+            }
           }
-          
-          return updatedPlayers;
         });
+      
+        // 플레이어 상태 변경 구독
+        subscribe(`/topic/player/${roomId}`, (data) => {
+          debug("플레이어 상태 업데이트", data);
+          
+          if (data && data.id) {
+            // 단일 플레이어 상태 업데이트
+            setPlayers(prevPlayers => {
+              const updatedPlayers = [...prevPlayers];
+              const playerIndex = updatedPlayers.findIndex(p => p.id === data.id);
+              
+              if (playerIndex !== -1) {
+                // 기존 플레이어 정보 유지하면서 새 정보 병합
+                updatedPlayers[playerIndex] = {
+                  ...updatedPlayers[playerIndex],
+                  nickname: data.nickname || updatedPlayers[playerIndex].nickname,
+                  profileImage: data.profileImage || data.avatarUrl || updatedPlayers[playerIndex].profileImage,
+                  ready: data.ready !== undefined ? data.ready : data.isReady !== undefined ? data.isReady : updatedPlayers[playerIndex].ready,
+                  isOwner: data.isOwner !== undefined ? data.isOwner : updatedPlayers[playerIndex].isOwner,
+                  status: data.status || updatedPlayers[playerIndex].status,
+                  score: data.score !== undefined ? data.score : updatedPlayers[playerIndex].score
+                };
+                
+                // 현재 사용자의 상태가 변경된 경우 isReady 상태도 업데이트
+                if (currentUserId && data.id === currentUserId.toString()) {
+                  setIsReady(updatedPlayers[playerIndex].ready);
+                }
+              } else if (data.id) {
+                // 새 플레이어 추가
+                const newPlayer: PlayerProfile = {
+                  id: data.id,
+                  nickname: data.nickname || data.name || '사용자',
+                  profileImage: data.profileImage || data.avatarUrl || DEFAULT_PROFILE_IMAGE,
+                  isOwner: Boolean(data.isOwner),
+                  ready: Boolean(data.ready || data.isReady),
+                  status: data.status || "WAITING",
+                  score: data.score || 0
+                };
+                
+                updatedPlayers.push(newPlayer);
+              }
+              
+              return updatedPlayers;
+            });
+          }
+        });
+      
+        // 채팅 메시지 구독 - 1번 주소
+        subscribe(`/topic/room/chat/${roomId}`, (data) => {
+          debug("채팅 메시지 수신 (주소1)", data);
+          handleChatMessage(data, "주소1");
+        });
+      
+        // 채팅 메시지 구독 - 2번 주소 (대체 경로)
+        subscribe(`/topic/chat/room/${roomId}`, (data) => {
+          debug("채팅 메시지 수신 (주소2)", data);
+          handleChatMessage(data, "주소2");
+        });
+      
+        // 채팅 메시지 구독 - 3번 주소 (게임 채팅 경로)
+        subscribe(`/topic/game/chat/${roomId}`, (data) => {
+          debug("채팅 메시지 수신 (주소3)", data);
+          handleChatMessage(data, "주소3");
+        });
+        
+        debug("구독 설정 완료");
+        return true;
+      } catch (error) {
+        console.error("구독 설정 중 오류 발생:", error);
+        debug("구독 설정 실패");
+        return false;
       }
-    });
+    };
     
-    // 채팅 메시지 구독 - 1번 주소
-    subscribe(`/topic/room/chat/${roomId}`, (data) => {
-      debug("채팅 메시지 수신 (주소1)", data);
-      handleChatMessage(data, "주소1");
-    });
-    
-    // 채팅 메시지 구독 - 2번 주소 (대체 경로)
-    subscribe(`/topic/chat/room/${roomId}`, (data) => {
-      debug("채팅 메시지 수신 (주소2)", data);
-      handleChatMessage(data, "주소2");
-    });
-    
-    // 채팅 메시지 구독 - 3번 주소 (게임 채팅 경로)
-    subscribe(`/topic/game/chat/${roomId}`, (data) => {
-      debug("채팅 메시지 수신 (주소3)", data);
-      handleChatMessage(data, "주소3");
-    });
+    // 구독 시도 시작
+    trySubscribe();
+    return true;
   };
 
   // 채팅 메시지 처리 공통 함수
@@ -553,13 +604,55 @@ export default function RoomPage() {
     const loadData = async () => {
       try {
         debug("초기 데이터 로딩 시작");
-        const user = await fetchCurrentUser();
-        if (user) {
-          await fetchRoomData();
-          setupWebSocket();
-          debug("초기 데이터 로딩 및 웹소켓 설정 완료");
+        
+        // 웹소켓 연결 상태 확인 및 필요시 재연결
+        if (!isConnected()) {
+          debug("웹소켓 연결 확인 - 연결 안됨, 재연결 시도");
+          const reconnected = reconnectWebSocket();
+          if (!reconnected) {
+            debug("웹소켓 재연결 실패");
+            // 페이지 로드 초기에 재연결 실패 시 바로 에러 표시하지 않고
+            // 사용자 정보와 방 정보 로드 후 구독 설정에서 다시 시도
+            console.warn("웹소켓 재연결 실패, 사용자/방 정보 로드 후 다시 시도");
+          } else {
+            debug("웹소켓 재연결 성공");
+            // 재연결 후 연결이 완전히 설정될 때까지 잠시 대기
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
         } else {
+          debug("웹소켓 연결 확인 - 이미 연결됨");
+        }
+        
+        // 사용자 정보 로드
+        const user = await fetchCurrentUser();
+        if (!user) {
           setError("사용자 정보를 가져올 수 없습니다. 로그인이 필요합니다.");
+          return;
+        }
+        
+        // 방 정보 로드
+        await fetchRoomData();
+        
+        // 구독 설정 - 최대 3번 시도
+        let wsSetupSuccess = false;
+        for (let i = 0; i < 3; i++) {
+          debug(`웹소켓 구독 설정 시도 ${i + 1}/3`);
+          wsSetupSuccess = setupWebSocket();
+          if (wsSetupSuccess) {
+            debug("구독 설정 성공");
+            break;
+          }
+          
+          // 설정 실패 시 1초 대기 후 재시도
+          debug("구독 설정 실패, 재시도...");
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
+        if (!wsSetupSuccess) {
+          debug("여러 번의 시도 후에도 구독 설정 실패");
+          setError("실시간 업데이트 연결에 실패했습니다. 페이지를 새로고침하거나 다시 시도해주세요.");
+        } else {
+          debug("초기 데이터 로딩 및 웹소켓 설정 완료");
         }
       } catch (error) {
         console.error("데이터 로딩 중 오류:", error);
@@ -575,6 +668,8 @@ export default function RoomPage() {
       unsubscribe(`/topic/room/${roomId}`);
       unsubscribe(`/topic/player/${roomId}`);
       unsubscribe(`/topic/room/chat/${roomId}`);
+      unsubscribe(`/topic/chat/room/${roomId}`);
+      unsubscribe(`/topic/game/chat/${roomId}`);
     };
   }, [roomId]);
 
