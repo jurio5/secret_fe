@@ -14,6 +14,13 @@ interface PlayerListProps {
 export default function PlayerList({ players, currentUserId }: PlayerListProps) {
   // 로딩 중 상태 처리 - 플레이어 목록이 빈 배열일 때
   const isEmpty = players.length === 0;
+  
+  console.log("PlayerList 렌더링:", { 
+    isEmpty, 
+    playersCount: players.length, 
+    players,
+    currentUserId 
+  });
 
   return (
     <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-6 h-full">
