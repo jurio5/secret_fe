@@ -655,7 +655,7 @@ export default function RoomPage() {
     <AppLayout>
       <div className="flex flex-col h-full max-w-7xl mx-auto">
         {/* 방 헤더 */}
-        <RoomHeader room={room} onBack={leaveRoom} />
+        <RoomHeader room={room} />
         
         {/* 메인 콘텐츠 영역 */}
         <div className="flex-1 p-4 md:p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
