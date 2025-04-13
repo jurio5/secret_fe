@@ -1129,6 +1129,25 @@ function LobbyContent({
       return;
     }
     
+    // 방 삭제 메시지인 경우
+    if (message === "ROOM_DELETED" || message.startsWith && message.startsWith("ROOM_DELETED:")) {
+      console.log("방 삭제 알림 수신:", message);
+      // 방 ID 추출 시도
+      const roomId = message.startsWith && message.startsWith("ROOM_DELETED:") 
+        ? message.split(":")[1] 
+        : null;
+      
+      if (roomId) {
+        // 특정 방 ID만 삭제
+        setRooms(prevRooms => prevRooms.filter(room => room.id !== parseInt(roomId)));
+        console.log(`방 ID ${roomId} 삭제됨`);
+      } else {
+        // 방 목록 새로고침
+        loadRooms();
+      }
+      return;
+    }
+    
     // 사용자 상태 메시지인 경우
     if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || message.type === "STATUS_UPDATE") {
       // 사용자 목록 갱신
