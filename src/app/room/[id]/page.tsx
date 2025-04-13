@@ -47,6 +47,10 @@ export default function RoomPage() {
   const [isComposing, setIsComposing] = useState<boolean>(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
+  // 상태 ref 추가
+  const currentUserIdRef = useRef<number | null>(null);
+  const currentUserRef = useRef<any>(null);
+
   // 디버깅 컨트롤
   const debug = (message: string, data?: any) => {
     console.log(`[디버그] ${message}`, data || '');
@@ -121,7 +125,10 @@ export default function RoomPage() {
         debug("사용자 정보 로드 성공", userData);
         
         setCurrentUserId(userData.id);
+        currentUserIdRef.current = userData.id; // ref에 저장
+        
         setCurrentUser(userData);
+        currentUserRef.current = userData; // ref에 저장
         
         // 방장 여부 확인 (room이 이미 로드된 경우) - 헬퍼 함수 사용
         if (room) {
@@ -139,6 +146,81 @@ export default function RoomPage() {
     } catch (error) {
       console.error("사용자 정보를 가져오는데 실패했습니다:", error);
       return null;
+    }
+  };
+
+  // 방 참가자 정보 직접 로드하는 함수 추가
+  const fetchRoomPlayers = async (): Promise<PlayerProfile[] | undefined> => {
+    try {
+      debug("참가자 목록 직접 로드 요청");
+      
+      // 방 참가자 정보 API 호출
+      const response = await (client.GET as any)(`/api/v1/rooms/${roomId}/members`, {}) as ApiResponse<any[]>;
+      
+      if (response.error) {
+        console.error("참가자 목록 로드 실패:", response.error);
+        return [];
+      }
+      
+      if (response.data?.data) {
+        const playersData = response.data.data;
+        debug("참가자 목록 로드 성공:", playersData);
+        
+        // 유저 ID ref 사용
+        const userId = currentUserIdRef.current;
+        let hasCurrentUser = false;
+        
+        // 플레이어 데이터 형식 통일화
+        const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
+          // ID가 숫자면 문자열로 변환
+          const id = typeof player.id === 'number' ? String(player.id) : player.id;
+          
+          // 현재 사용자가 목록에 있는지 확인
+          if (userId && id === userId.toString()) {
+            hasCurrentUser = true;
+          }
+          
+          // 방장 여부 확인
+          const isPlayerOwner = Boolean(player.isOwner === true || 
+            (room?.ownerId && id === room.ownerId.toString()));
+          
+          return {
+            id,
+            nickname: player.nickname || player.name || '사용자',
+            profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
+            isOwner: isPlayerOwner,
+            ready: Boolean(player.ready || player.isReady),
+            status: player.status || "WAITING",
+            score: player.score || 0
+          };
+        });
+        
+        // 현재 유저가 목록에 없고 방에 입장 중인 경우 자신을 추가
+        if (!hasCurrentUser && userId && room) {
+          debug("참가자 목록에 현재 사용자가 없음, 자신을 추가");
+          const isCurrentUserOwner = isUserRoomOwner(room, userId);
+          const selfPlayer: PlayerProfile = {
+            id: userId.toString(),
+            nickname: currentUserRef.current?.nickname || "사용자",
+            profileImage: currentUserRef.current?.profileImage || DEFAULT_PROFILE_IMAGE,
+            isOwner: isCurrentUserOwner,
+            ready: isReady,
+            status: "WAITING",
+            score: 0
+          };
+          formattedPlayers.push(selfPlayer);
+          debug("참가자 목록에 자신을 추가", selfPlayer);
+        }
+        
+        setPlayers(formattedPlayers);
+        debug("참가자 목록 업데이트 완료", formattedPlayers);
+        
+        return formattedPlayers;
+      }
+      return [];
+    } catch (error) {
+      console.error("참가자 목록 로드 중 오류:", error);
+      return [];
     }
   };
 
@@ -194,10 +276,16 @@ export default function RoomPage() {
             
             // JOIN, LEAVE, READY 이벤트 발생 시 서버에서 최신 플레이어 목록 조회
             if (data.type === 'JOIN' || data.type === 'LEAVE' || data.type === 'READY') {
+              // 현재 상태 값을 캡처
+              const capturedCurrentUserId = currentUserIdRef.current;
+              const capturedCurrentUser = currentUserRef.current;
+              
               // 1초 후 서버에서 최신 정보 조회 (이벤트 처리 시간 고려)
               setTimeout(async () => {
                 try {
                   debug(`${data.type} 이벤트 발생, 서버에서 최신 정보 조회`);
+                  
+                  // 방 정보 갱신
                   const response = await (client.GET as any)(`/api/v1/rooms/${roomId}`, {}) as ApiResponse<RoomResponse>;
                   
                   if (response.error) {
@@ -212,71 +300,88 @@ export default function RoomPage() {
                     // 방 정보 업데이트
                     setRoom(roomData);
                     
-                    // players 필드가 있으면 사용 (빈 배열이어도 그대로 사용)
-                    const playersData = roomData.players || [];
-                    debug("플레이어 목록:", playersData);
+                    // 방 참가자 정보 직접 로드 시도 (추가)
+                    await fetchRoomPlayers();
                     
-                    // 플레이어 데이터가 비어있는지 확인
-                    let hasCurrentUser = false;
-                    
-                    // 빈 배열이어도 처리 (플레이어가 없는 상태)
-                    const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
-                      // ID가 숫자면 문자열로 변환
-                      const id = typeof player.id === 'number' ? String(player.id) : player.id;
+                    // Fallback: players 배열이 비어있는지 확인
+                    const currentPlayers = players; // 현재 상태 캡처
+                    if (currentPlayers.length === 0) {
+                      debug("참가자 목록이 비어있어 방 정보에서 직접 추출 시도");
                       
-                      // 현재 사용자가 목록에 있는지 확인
-                      if (currentUserId && id === currentUserId.toString()) {
-                        hasCurrentUser = true;
+                      // players 필드가 있으면 사용 (빈 배열이어도 그대로 사용)
+                      const playersData = roomData.players || [];
+                      debug("플레이어 목록:", playersData);
+                      
+                      // 상태 대신 캡처된 값 또는 ref 값 사용
+                      const userId = capturedCurrentUserId;
+                      // 플레이어 데이터가 비어있는지 확인
+                      let hasCurrentUser = false;
+                      
+                      debug("현재 사용자 확인:", {
+                        capturedUserId: userId,
+                        stateUserId: currentUserId, 
+                        refUserId: currentUserIdRef.current
+                      });
+                      
+                      // 빈 배열이어도 처리 (플레이어가 없는 상태)
+                      const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
+                        // ID가 숫자면 문자열로 변환
+                        const id = typeof player.id === 'number' ? String(player.id) : player.id;
+                        
+                        // 현재 사용자가 목록에 있는지 확인
+                        if (userId && id === userId.toString()) {
+                          hasCurrentUser = true;
+                        }
+                        
+                        // 방장 여부 확인 - boolean 타입으로 명시적 변환
+                        const isPlayerOwner = Boolean(player.isOwner === true || 
+                          (roomData.ownerId && id === roomData.ownerId.toString()));
+                        
+                        return {
+                          id,
+                          nickname: player.nickname || player.name || '사용자',
+                          profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
+                          isOwner: isPlayerOwner,
+                          ready: Boolean(player.ready || player.isReady),
+                          status: player.status || "WAITING",
+                          score: player.score || 0
+                        };
+                      });
+                      
+                      // 현재 유저가 목록에 없고 방에 입장 중인 경우 자신을 추가
+                      if (!hasCurrentUser && userId && roomData) {
+                        debug("플레이어 목록에 현재 사용자가 없음, 자신을 추가");
+                        const isCurrentUserOwner = isUserRoomOwner(roomData, userId);
+                        const selfPlayer: PlayerProfile = {
+                          id: userId.toString(),
+                          nickname: capturedCurrentUser?.nickname || "사용자",
+                          profileImage: capturedCurrentUser?.profileImage || DEFAULT_PROFILE_IMAGE,
+                          isOwner: isCurrentUserOwner,
+                          ready: isReady,
+                          status: "WAITING",
+                          score: 0
+                        };
+                        formattedPlayers.push(selfPlayer);
+                        debug("플레이어 목록에 자신을 추가", selfPlayer);
                       }
                       
-                      // 방장 여부 확인 - boolean 타입으로 명시적 변환
-                      const isPlayerOwner = Boolean(player.isOwner === true || 
-                        (roomData.ownerId && id === roomData.ownerId.toString()));
+                      // 목록이 여전히 비어있으면 로그 남기기
+                      if (formattedPlayers.length === 0) {
+                        console.warn("여전히 빈 플레이어 목록:", {
+                          currentUserId: userId,
+                          hasCurrentUser,
+                          roomOwnerId: roomData.ownerId
+                        });
+                      }
                       
-                      return {
-                        id,
-                        nickname: player.nickname || player.name || '사용자',
-                        profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
-                        isOwner: isPlayerOwner,
-                        ready: Boolean(player.ready || player.isReady),
-                        status: player.status || "WAITING",
-                        score: player.score || 0
-                      };
-                    });
-                    
-                    // 현재 유저가 목록에 없고 방에 입장 중인 경우 자신을 추가
-                    if (!hasCurrentUser && currentUserId) {
-                      debug("플레이어 목록에 현재 사용자가 없음, 자신을 추가");
-                      const isCurrentUserOwner = isUserRoomOwner(roomData, currentUserId);
-                      const selfPlayer: PlayerProfile = {
-                        id: currentUserId.toString(),
-                        nickname: currentUser?.nickname || "사용자",
-                        profileImage: currentUser?.profileImage || DEFAULT_PROFILE_IMAGE,
-                        isOwner: isCurrentUserOwner,
-                        ready: isReady,
-                        status: "WAITING",
-                        score: 0
-                      };
-                      formattedPlayers.push(selfPlayer);
-                      debug("플레이어 목록이 비어있어 자신을 추가", selfPlayer);
-                    }
-                    
-                    // 목록이 여전히 비어있으면 로그 남기기
-                    if (formattedPlayers.length === 0) {
-                      console.warn("여전히 빈 플레이어 목록:", {
-                        currentUserId,
-                        hasCurrentUser,
-                        roomOwnerId: roomData.ownerId
-                      });
-                    }
-                    
-                    setPlayers(formattedPlayers);
-                    debug("플레이어 목록 업데이트 완료", formattedPlayers);
-                    
-                    // 방장 여부 업데이트
-                    if (roomData.ownerId && currentUserId) {
-                      const isCurrentUserOwner = isUserRoomOwner(roomData, currentUserId);
-                      setIsOwner(isCurrentUserOwner);
+                      setPlayers(formattedPlayers);
+                      debug("플레이어 목록 업데이트 완료", formattedPlayers);
+                      
+                      // 방장 여부 업데이트
+                      if (roomData.ownerId && userId) {
+                        const isCurrentUserOwner = isUserRoomOwner(roomData, userId);
+                        setIsOwner(isCurrentUserOwner);
+                      }
                     }
                   }
                 } catch (error) {
@@ -623,15 +728,18 @@ export default function RoomPage() {
         // 방 정보 로드
         await fetchRoomData();
         
-        // 이 시점에서 플레이어 목록이 비어있으면 자동으로 자신을 추가
-        if (players.length === 0 && currentUserId && room) {
-          debug("초기 로딩 시점에서 플레이어 목록이 비어있어 자신을 추가합니다");
+        // 방 참가자 정보 직접 로드 (추가)
+        const loadedPlayers = await fetchRoomPlayers();
+        
+        // 참가자 정보 로드 실패 시 이 시점에서 플레이어 목록이 비어있으면 자동으로 자신을 추가
+        if ((loadedPlayers?.length === 0 || !loadedPlayers) && currentUserIdRef.current && room) {
+          debug("참가자 목록이 비어있어 자동으로 자신을 추가합니다");
           
-          const isCurrentUserOwner = isUserRoomOwner(room, currentUserId);
+          const isCurrentUserOwner = isUserRoomOwner(room, currentUserIdRef.current);
           const selfPlayer: PlayerProfile = {
-            id: currentUserId.toString(),
-            nickname: currentUser?.nickname || "사용자",
-            profileImage: currentUser?.profileImage || DEFAULT_PROFILE_IMAGE,
+            id: currentUserIdRef.current.toString(),
+            nickname: currentUserRef.current?.nickname || "사용자",
+            profileImage: currentUserRef.current?.profileImage || DEFAULT_PROFILE_IMAGE,
             isOwner: isCurrentUserOwner,
             ready: isReady,
             status: "WAITING",
@@ -673,14 +781,14 @@ export default function RoomPage() {
           debug("초기 데이터 로딩 및 웹소켓 설정 완료");
           
           // 구독 설정 성공 후에도 한번 더 플레이어 목록 확인
-          if (players.length === 0 && currentUserId && room) {
+          if (loadedPlayers?.length === 0 && currentUserIdRef.current && room) {
             debug("구독 설정 후에도 플레이어 목록이 비어있어 자신을 추가합니다");
             
-            const isCurrentUserOwner = isUserRoomOwner(room, currentUserId);
+            const isCurrentUserOwner = isUserRoomOwner(room, currentUserIdRef.current);
             const selfPlayer: PlayerProfile = {
-              id: currentUserId.toString(),
-              nickname: currentUser?.nickname || "사용자",
-              profileImage: currentUser?.profileImage || DEFAULT_PROFILE_IMAGE,
+              id: currentUserIdRef.current.toString(),
+              nickname: currentUserRef.current?.nickname || "사용자",
+              profileImage: currentUserRef.current?.profileImage || DEFAULT_PROFILE_IMAGE,
               isOwner: isCurrentUserOwner,
               ready: isReady,
               status: "WAITING",
@@ -692,8 +800,8 @@ export default function RoomPage() {
             
             // 누락된 경우 강제로 로그 출력
             console.warn("플레이어 목록 상태 확인:", {
-              playersLength: players.length,
-              currentUserId,
+              playersLength: loadedPlayers?.length,
+              currentUserId: currentUserIdRef.current,
               roomData: room
             });
           }
@@ -732,14 +840,14 @@ export default function RoomPage() {
   // 플레이어 목록 처리 로직 강화
   useEffect(() => {
     // 플레이어 목록이 비어있고, 사용자 정보와 방 정보가 모두 있을 때 자동으로 자신을 추가
-    if (players.length === 0 && currentUserId && room) {
+    if (players.length === 0 && currentUserIdRef.current && room) {
       debug("플레이어 목록이 비어 있어 자동으로 자신을 추가합니다");
       
-      const isCurrentUserOwner = isUserRoomOwner(room, currentUserId);
+      const isCurrentUserOwner = isUserRoomOwner(room, currentUserIdRef.current);
       const selfPlayer: PlayerProfile = {
-        id: currentUserId.toString(),
-        nickname: currentUser?.nickname || "사용자",
-        profileImage: currentUser?.profileImage || DEFAULT_PROFILE_IMAGE,
+        id: currentUserIdRef.current.toString(),
+        nickname: currentUserRef.current?.nickname || "사용자",
+        profileImage: currentUserRef.current?.profileImage || DEFAULT_PROFILE_IMAGE,
         isOwner: isCurrentUserOwner,
         ready: isReady,
         status: "WAITING",
@@ -749,7 +857,7 @@ export default function RoomPage() {
       setPlayers([selfPlayer]);
       debug("자신을 플레이어 목록에 추가 완료", selfPlayer);
     }
-  }, [players.length, currentUserId, currentUser, room, isReady]);
+  }, [players.length, room, isReady]);
 
   // 에러 발생 시 표시
   if (error) {
