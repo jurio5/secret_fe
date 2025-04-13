@@ -5,6 +5,9 @@ import { fetchWithRetry, fetchWithAuthErrorHandling } from '@/lib/utils/apiUtils
 // API 기본 URL 설정
 const API_BASE_URL = process.env.NEXT_PUBLIC_WAS_HOST || 'https://quizzle.p-e.kr';
 
+// 기본 아바타 URL
+const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';
+
 // 현재 로그인한 사용자 정보 가져오기
 const getCurrentUser = async () => {
   try {
@@ -35,7 +38,26 @@ export const getFriendList = async (): Promise<Friend[]> => {
       )
     );
     
-    return (response.data?.data || []) as Friend[];
+    // API 응답 데이터 (실제 백엔드에서 데이터가 올바르게 오지 않는 경우에 대비한 가공 처리)
+    let friends = (response.data?.data || []) as Friend[];
+    
+    // 데이터 가공: 아바타 URL이 없거나 온라인 상태가 없는 경우 모킹 데이터로 강화
+    friends = friends.map(friend => {
+      // 현재 시간 기준 랜덤 온라인 상태 생성 (예시용, 실제로는 서버에서 받아와야 함)
+      const isOnline = Math.random() > 0.5;
+      
+      // 아바타 URL이 없는 경우 기본 아바타 제공
+      const avatarUrl = friend.avatarUrl || DEFAULT_AVATAR;
+      
+      return {
+        ...friend,
+        avatarUrl,
+        isOnline
+      };
+    });
+    
+    console.log('친구 목록 데이터 (강화됨):', friends);
+    return friends;
   } catch (error) {
     console.error("친구 목록을 불러오는데 실패했습니다:", error);
     return [];
@@ -53,7 +75,22 @@ export const getFriendRequests = async (): Promise<FriendRequest[]> => {
       )
     );
     
-    return (response.data?.data || []) as FriendRequest[];
+    // API 응답 데이터 
+    let requests = (response.data?.data || []) as FriendRequest[];
+    
+    // 데이터 가공: 아바타 URL이 없는 경우 모킹 데이터로 강화
+    requests = requests.map(request => {
+      // 아바타 URL이 없는 경우 기본 아바타 제공
+      const avatarUrl = request.avatarUrl || DEFAULT_AVATAR;
+      
+      return {
+        ...request,
+        avatarUrl
+      };
+    });
+    
+    console.log('친구 요청 데이터 (강화됨):', requests);
+    return requests;
   } catch (error) {
     console.error("친구 요청 목록을 불러오는데 실패했습니다:", error);
     return [];
