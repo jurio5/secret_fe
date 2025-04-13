@@ -1045,9 +1045,63 @@ function LobbyContent({
 
   // 메시지 타입에 따른 처리
   const receiveMessage = (message: any) => {
-    // ... existing code ...
-
-    // 메시지 타입에 따른 처리
+    // 채팅 메시지인 경우
+    if (message.type === "CHAT" || (!message.type && message.content)) {
+      // 사용자 프로필 정보 확인 및 아바타 URL 가져오기
+      let avatarUrl = undefined;
+      
+      if (message.senderId && message.senderId !== "system") {
+        const senderId = parseInt(message.senderId);
+        // 캐시에서 아바타 URL 찾기
+        avatarUrl = userProfileCache[senderId]?.avatarUrl;
+        
+        // 캐시에 사용자 정보가 없고 발신자가 현재 활성 사용자 목록에 있는 경우
+        if (!avatarUrl) {
+          // 활성 사용자 목록에서 찾기
+          const activeUser = activeUsers.find(user => user.id === senderId);
+          if (activeUser && activeUser.avatarUrl) {
+            avatarUrl = activeUser.avatarUrl;
+            
+            // 캐시 업데이트
+            if (!userProfileCache[senderId]) {
+              userProfileCache[senderId] = {
+                id: senderId,
+                nickname: message.senderName,
+                avatarUrl: activeUser.avatarUrl,
+                lastUpdated: Date.now()
+              };
+            }
+          } else {
+            // 기본 아바타 설정
+            avatarUrl = DEFAULT_AVATAR;
+          }
+        }
+      }
+      
+      // 메시지에 아바타 URL 추가
+      setChatMessages((prevMessages) => {
+        // 새 메시지가 추가된 배열
+        const newMessages = [...prevMessages, {
+          ...message,
+          avatarUrl: avatarUrl || DEFAULT_AVATAR
+        }];
+        
+        // 메시지 최대 개수 제한 (너무 많은 메시지가 쌓이지 않도록)
+        const maxMessages = 100;
+        const trimmedMessages = newMessages.length > maxMessages 
+          ? newMessages.slice(newMessages.length - maxMessages) 
+          : newMessages;
+        
+        // 글로벌 캐시 업데이트
+        lobbyMessageCache = [...trimmedMessages];
+        
+        return trimmedMessages;
+      });
+      
+      return;
+    }
+    
+    // 사용자 상태 메시지인 경우
     if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || message.type === "STATUS_UPDATE") {
       // 사용자 목록 갱신
       setActiveUsers(prev => {
@@ -1072,26 +1126,36 @@ function LobbyContent({
         
         return filtered;
       });
+      
+      // 상태 메시지는 채팅에 추가하지 않음
+      return;
     }
-
-    // ... existing code ...
   };
 
   // WebSocket 초기화에 로비 상태 메시지 구독 추가
   const initializeWebSocket = async () => {
-    // ... existing code ...
+    try {
+      // 로비 채팅 메시지 구독 - 이제 모든 메시지 타입이 receiveMessage에서 구분되어 처리됨
+      subscribe("/topic/lobby/chat", receiveMessage);
+      
+      // 로비 상태 업데이트 구독 - 상태 메시지와 채팅 메시지 분리
+      subscribe("/topic/lobby/status", receiveMessage);
+      
+      // 로비 사용자 목록 구독
+      subscribe("/topic/lobby/users", receiveMessage);
+      
+      setIsConnected(true);
+      console.log("WebSocket 연결 성공");
+      
+      // 연결 성공 시 사용자 정보 로드
+      await fetchCurrentUser();
+      
+      // 방 목록 로드
+      await loadRooms();
+    } catch (error) {
+      console.error("WebSocket 초기화 중 오류 발생:", error);
+    }
     
-    // 로비 채팅 메시지 구독
-    subscribe("/topic/lobby/chat", receiveMessage);
-    
-    // 로비 상태 업데이트 메시지 구독
-    subscribe("/topic/lobby/status", receiveMessage);
-    
-    // 로비 사용자 목록 구독 (이 토픽 이름 확인)
-    subscribe("/topic/lobby/users", receiveMessage);
-    
-    // ... existing code ...
-
     // 연결 성공 시 본인 상태를 로비에 업데이트
     publish('/app/lobby/status', {
       type: "STATUS_UPDATE",
