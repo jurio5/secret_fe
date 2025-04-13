@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { FaUsers, FaCrown, FaCheck } from "react-icons/fa";
-import { PlayerProfile } from "../../types/room";
+import { PlayerProfile } from "../../lib/types/room";
 
 // 기본 프로필 이미지 URL
 const DEFAULT_PROFILE_IMAGE = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';

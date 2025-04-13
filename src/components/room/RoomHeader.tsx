@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { RoomResponse } from '../../types/room';
+import { RoomResponse } from '../../lib/types/room';
 
 interface RoomHeaderProps {
   room: RoomResponse | null;

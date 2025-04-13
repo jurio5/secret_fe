@@ -7,7 +7,7 @@ import client from "@/lib/backend/client";
 import { subscribe, unsubscribe, publish } from "@/lib/backend/stompClient";
 import Image from "next/image";
 import { FaChevronLeft, FaDoorOpen, FaCrown, FaCheck, FaComments, FaUsers, FaInfoCircle, FaPlay } from "react-icons/fa";
-import { RoomResponse, PlayerProfile, RoomStatus, RoomMessageType } from "@/types/room";
+import { RoomResponse, PlayerProfile, RoomStatus, RoomMessageType } from "../../../lib/types/room";
 import PlayerList from "@/components/room/PlayerList";
 import RoomHeader from "@/components/room/RoomHeader";
 
@@ -634,7 +634,7 @@ export default function RoomPage() {
   // 에러 발생 시 표시
   if (error) {
     return (
-      <AppLayout>
+      <AppLayout showHomeButton={false}>
         <div className="flex flex-col items-center justify-center h-[70vh] text-center p-4">
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-4">
             <p className="font-bold mb-2">오류 발생</p>
@@ -652,7 +652,7 @@ export default function RoomPage() {
   }
 
   return (
-    <AppLayout>
+    <AppLayout showHomeButton={false} showBeforeUnloadWarning={true}>
       <div className="flex flex-col h-full max-w-7xl mx-auto">
         {/* 방 헤더 */}
         <RoomHeader room={room} />
