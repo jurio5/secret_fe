@@ -192,7 +192,108 @@ export default function RoomPage() {
           if (data && data.type) {
             debug(`메시지 타입: ${data.type}`);
             
-            // room 정보 업데이트 - 기존 방 정보는 유지하고 새로운 속성만 업데이트
+            // JOIN, LEAVE, READY 이벤트 발생 시 서버에서 최신 플레이어 목록 조회
+            if (data.type === 'JOIN' || data.type === 'LEAVE' || data.type === 'READY') {
+              // 1초 후 서버에서 최신 정보 조회 (이벤트 처리 시간 고려)
+              setTimeout(async () => {
+                try {
+                  debug(`${data.type} 이벤트 발생, 서버에서 최신 정보 조회`);
+                  const response = await (client.GET as any)(`/api/v1/rooms/${roomId}`, {}) as ApiResponse<RoomResponse>;
+                  
+                  if (response.error) {
+                    console.error("방 정보 갱신 실패:", response.error);
+                    return;
+                  }
+                  
+                  if (response.data?.data) {
+                    const roomData = response.data.data;
+                    debug("서버에서 최신 방 정보 로드 성공", roomData);
+                    
+                    // 방 정보 업데이트
+                    setRoom(roomData);
+                    
+                    // 플레이어 목록 수동 조회 (roomData에 players 필드가 있는 경우)
+                    if (roomData.players && Array.isArray(roomData.players) && roomData.players.length > 0) {
+                      debug("플레이어 목록 발견:", roomData.players);
+                      
+                      // 플레이어 데이터 형식 통일화
+                      const formattedPlayers: PlayerProfile[] = roomData.players.map((player: any) => {
+                        // ID가 숫자면 문자열로 변환
+                        const id = typeof player.id === 'number' ? String(player.id) : player.id;
+                        
+                        // 방장 여부 확인 - boolean 타입으로 명시적 변환
+                        const isPlayerOwner = Boolean(player.isOwner === true || 
+                          (roomData.ownerId && id === roomData.ownerId.toString()));
+                        
+                        return {
+                          id,
+                          nickname: player.nickname || player.name || '사용자',
+                          profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
+                          isOwner: isPlayerOwner,
+                          ready: Boolean(player.ready || player.isReady),
+                          status: player.status || "WAITING",
+                          score: player.score || 0
+                        };
+                      });
+                      
+                      setPlayers(formattedPlayers);
+                      debug("플레이어 목록 수동 업데이트 완료", formattedPlayers);
+                    } else {
+                      // 플레이어 목록을 별도로 조회
+                      try {
+                        debug("플레이어 목록 별도 조회");
+                        const playersResponse = await (client.GET as any)(`/api/v1/rooms/${roomId}/players`, {}) as ApiResponse<any[]>;
+                        
+                        if (playersResponse.error) {
+                          console.error("플레이어 목록 조회 실패:", playersResponse.error);
+                          return;
+                        }
+                        
+                        if (playersResponse.data?.data) {
+                          const playersData = playersResponse.data.data;
+                          debug("플레이어 목록 조회 성공:", playersData);
+                          
+                          // 플레이어 데이터 형식 통일화
+                          const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
+                            // ID가 숫자면 문자열로 변환
+                            const id = typeof player.id === 'number' ? String(player.id) : player.id;
+                            
+                            // 방장 여부 확인 - boolean 타입으로 명시적 변환
+                            const isPlayerOwner = Boolean(player.isOwner === true || 
+                              (roomData.ownerId && id === roomData.ownerId.toString()));
+                            
+                            return {
+                              id,
+                              nickname: player.nickname || player.name || '사용자',
+                              profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
+                              isOwner: isPlayerOwner,
+                              ready: Boolean(player.ready || player.isReady),
+                              status: player.status || "WAITING",
+                              score: player.score || 0
+                            };
+                          });
+                          
+                          setPlayers(formattedPlayers);
+                          debug("플레이어 목록 수동 업데이트 완료", formattedPlayers);
+                        }
+                      } catch (error) {
+                        console.error("플레이어 목록 조회 중 오류:", error);
+                      }
+                    }
+                    
+                    // 방장 여부 업데이트
+                    if (roomData.ownerId && currentUserId) {
+                      const isCurrentUserOwner = isUserRoomOwner(roomData, currentUserId);
+                      setIsOwner(isCurrentUserOwner);
+                    }
+                  }
+                } catch (error) {
+                  console.error("최신 방 정보 조회 중 오류:", error);
+                }
+              }, 1000);
+            }
+            
+            // 기존 room 정보 업데이트 코드는 계속 유지
             if (data.type === 'ROOM_UPDATED' || data.type === 'JOIN' || data.type === 'LEAVE') {
               setRoom(prev => {
                 if (!prev) return data;
@@ -231,109 +332,6 @@ export default function RoomPage() {
                 
                 return updated;
               });
-              
-              // 방장 정보가 업데이트된 경우, 방장 여부 재확인
-              if ((data.ownerId || data.owner) && currentUserId) {
-                const userIdStr = currentUserId.toString();
-                // ownerId가 없으면 owner 사용
-                const roomOwnerId = data.ownerId || data.owner;
-                const roomOwnerIdStr = roomOwnerId?.toString() || "";
-                const isCurrentUserOwner = userIdStr === roomOwnerIdStr;
-                
-                debug("방장 여부 업데이트 (웹소켓)", {
-                  currentUserId: userIdStr,
-                  roomOwnerId: roomOwnerIdStr,
-                  isOwner: isCurrentUserOwner
-                });
-                
-                setIsOwner(isCurrentUserOwner);
-              }
-            }
-            
-            // data 필드에 플레이어 목록이 포함되어 있는 경우
-            if (data.data) {
-              try {
-                debug("플레이어 데이터 필드 발견", data.data);
-                
-                // 문자열인 경우 JSON으로 파싱
-                let playersData;
-                if (typeof data.data === 'string') {
-                  try {
-                    playersData = JSON.parse(data.data);
-                    debug("JSON 파싱된 플레이어 데이터", playersData);
-                  } catch (parseError) {
-                    console.error("플레이어 데이터 JSON 파싱 실패:", parseError);
-                    return;
-                  }
-                } else if (Array.isArray(data.data)) {
-                  playersData = data.data;
-                  debug("배열 형태의 플레이어 데이터", playersData);
-                } else {
-                  debug("지원되지 않는 플레이어 데이터 형식", typeof data.data);
-                  return;
-                }
-                
-                // 플레이어 데이터가 유효한지 확인
-                if (!Array.isArray(playersData)) {
-                  console.warn("플레이어 데이터가 배열이 아닙니다:", playersData);
-                  return;
-                }
-                
-                // JOIN, LEAVE 등의 메시지인 경우, 받은 플레이어 목록이 최신 상태임
-                if (playersData.length > 0) {
-                  debug(`${playersData.length}명의 플레이어 목록 수신`);
-                  
-                  // 플레이어 데이터 형식 통일화
-                  const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
-                    // ID가 숫자면 문자열로 변환
-                    const id = typeof player.id === 'number' ? String(player.id) : player.id;
-                    
-                    // 방장 여부 명확히 확인
-                    const isPlayerOwner = player.isOwner === true || 
-                      (room && room.owner === id) ? true : false;
-                    
-                    // 현재 사용자가 방장인지 확인 및 상태 업데이트
-                    if (currentUserId && id === currentUserId.toString() && isPlayerOwner) {
-                      debug("현재 사용자가 방장임", {userId: id, isOwner: isPlayerOwner});
-                      setIsOwner(true);
-                    }
-                    
-                    return {
-                      id,
-                      nickname: player.nickname || player.name || '사용자',
-                      profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
-                      isOwner: isPlayerOwner,
-                      ready: Boolean(player.ready || player.isReady),
-                      status: player.status || "WAITING",
-                      score: player.score || 0
-                    };
-                  });
-                  
-                  setPlayers(formattedPlayers);
-                  debug("플레이어 목록 업데이트 완료", formattedPlayers);
-                  
-                  // 플레이어 목록 업데이트 시 방 인원 수도 함께 업데이트
-                  setRoom(prev => {
-                    if (!prev) return prev;
-                    return {
-                      ...prev,
-                      currentPlayers: formattedPlayers.length
-                    };
-                  });
-                  
-                  // 현재 사용자의 준비 상태 확인
-                  if (currentUserId) {
-                    const currentPlayer = formattedPlayers.find(
-                      p => p.id === currentUserId.toString()
-                    );
-                    if (currentPlayer) {
-                      setIsReady(currentPlayer.ready);
-                    }
-                  }
-                }
-              } catch (error) {
-                console.error("플레이어 목록 처리 중 오류:", error);
-              }
             }
             
             // 게임 상태 업데이트
