@@ -205,6 +205,9 @@ export default function RoomPage() {
       unsubscribe("/topic/lobby/users");
       unsubscribe("/topic/lobby/status");
       
+      // beforeunload 경고 없이 로비로 이동하기 위해 로컬 스토리지에 플래그 설정
+      localStorage.setItem('intentional_navigation', 'true');
+      
       // 로비로 리다이렉트
       window.location.href = "/lobby";
     } catch (error) {
@@ -243,7 +246,7 @@ export default function RoomPage() {
 
   if (loading) {
     return (
-      <AppLayout>
+      <AppLayout showBeforeUnloadWarning={false}>
         <div className="flex justify-center items-center min-h-screen">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto"></div>
@@ -256,7 +259,7 @@ export default function RoomPage() {
 
   if (error) {
     return (
-      <AppLayout>
+      <AppLayout showBeforeUnloadWarning={false}>
         <div className="flex justify-center items-center min-h-screen">
           <div className="text-center">
             <div className="text-red-500 text-xl mb-4">오류 발생</div>
@@ -274,7 +277,7 @@ export default function RoomPage() {
   }
 
   return (
-    <AppLayout>
+    <AppLayout showBeforeUnloadWarning={false}>
       <div className="container mx-auto px-4 py-8">
         <div className="bg-gray-800 rounded-lg shadow-lg p-6">
           {/* 방 정보 헤더 */}
