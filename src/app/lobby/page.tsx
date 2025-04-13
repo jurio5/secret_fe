@@ -765,9 +765,22 @@ function LobbyContent({
     // 컴포넌트 언마운트 시 모든 구독 해제 및 웹소켓 정리
     return () => {
       console.log("로비 페이지 언마운트: 웹소켓 구독 해제");
+      
+      // 구독 해제 - 연결 자체는 유지 (페이지 간 이동을 위해)
       unsubscribe("/topic/lobby");
       unsubscribe("/topic/lobby/users");
       unsubscribe("/topic/lobby/chat");
+      unsubscribe("/topic/lobby/status");
+      
+      // 의도적인 네비게이션인지 확인 (룸으로 이동하는 경우 등)
+      const isIntentionalNavigation = localStorage.getItem('intentional_navigation') === 'true';
+      console.log("의도적 네비게이션 여부:", isIntentionalNavigation);
+      
+      if (!isIntentionalNavigation) {
+        // 의도적인 네비게이션이 아닌 경우에만 메시지 캐시 클리어
+        console.log("페이지 이탈: 메시지 캐시 클리어");
+        lobbyMessageCache = [];
+      }
       
       // 페이지 벗어날 때 세션 변경 여부 체크
       if (currentUser && currentUser.nickname && 
@@ -848,9 +861,16 @@ function LobbyContent({
   const handleSendChatMessage = () => {
     if (!newChatMessage.trim() || !currentUser) return;
     
-    // 채팅 메시지 발행
-    publish("/app/lobby/chat", newChatMessage);
+    // 발송할 메시지 내용
+    const messageContent = newChatMessage.trim();
+    
+    // 메시지 입력창 초기화
     setNewChatMessage("");
+    
+    // 서버로 채팅 메시지 발행
+    publish("/app/lobby/chat", messageContent);
+    
+    console.log("채팅 메시지 전송:", messageContent);
   };
   
   // 채팅 입력창 키 이벤트 핸들러
@@ -896,6 +916,19 @@ function LobbyContent({
     
     // 로비 채팅 구독
     const handleChatMessage = (message: any) => {
+      // 중복 메시지 검사: 동일한 시간과 내용을 가진 메시지가 있는지 확인
+      const isDuplicate = chatMessages.some(existingMsg => 
+        existingMsg.timestamp === message.timestamp && 
+        existingMsg.content === message.content &&
+        existingMsg.senderId === message.senderId
+      );
+      
+      // 중복 메시지면 무시
+      if (isDuplicate) {
+        console.log("중복 메시지 무시:", message);
+        return;
+      }
+      
       // 사용자 프로필 정보 확인 및 아바타 URL 가져오기
       let avatarUrl = undefined;
       
@@ -971,13 +1004,17 @@ function LobbyContent({
         }
       }
       
-      // 메시지에 아바타 URL 추가
+      // 메시지에 고유 ID 추가
+      const messageWithId = {
+        ...message,
+        id: `${message.senderId}-${message.timestamp}-${Math.random().toString(36).substr(2, 5)}`,
+        avatarUrl: avatarUrl || DEFAULT_AVATAR
+      };
+      
+      // 메시지 추가
       setChatMessages((prevMessages) => {
         // 새 메시지가 추가된 배열
-        const newMessages = [...prevMessages, {
-          ...message,
-          avatarUrl: avatarUrl || DEFAULT_AVATAR
-        }];
+        const newMessages = [...prevMessages, messageWithId];
         
         // 메시지 최대 개수 제한 (너무 많은 메시지가 쌓이지 않도록)
         const maxMessages = 100;
@@ -1259,8 +1296,8 @@ function LobbyContent({
       // 룸 업데이트 구독
       subscribe("/topic/lobby", receiveMessage);
       
-      // 로비 채팅 메시지 구독 - 이제 모든 메시지 타입이 receiveMessage에서 구분되어 처리됨
-      subscribe("/topic/lobby/chat", receiveMessage);
+      // 로비 채팅 메시지는 별도의 handleChatMessage 함수로 처리하므로 여기서는 구독하지 않음
+      // subscribe("/topic/lobby/chat", receiveMessage); - 제거: 중복 구독 방지
       
       // 로비 상태 업데이트 구독 - 상태 메시지와 채팅 메시지 분리
       subscribe("/topic/lobby/status", receiveMessage);
