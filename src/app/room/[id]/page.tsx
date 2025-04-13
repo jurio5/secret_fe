@@ -228,6 +228,10 @@ export default function RoomPage() {
     // 방 입장
     joinRoom();
     
+    // 방 페이지 로드 시 beforeunload 경고 비활성화 플래그 설정
+    // URL로 직접 접근 시에도 작동하도록 함
+    localStorage.setItem('intentional_navigation', 'true');
+    
     // 컴포넌트 언마운트 시 웹소켓 구독 해제 및 방 퇴장
     return () => {
       unsubscribe(`/topic/rooms/${roomId}`);
