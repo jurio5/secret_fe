@@ -13,7 +13,7 @@ interface PlayerListProps {
 
 export default function PlayerList({ players, currentUserId }: PlayerListProps) {
   // 로딩 중 상태 처리 - 플레이어 목록이 빈 배열일 때
-  const isLoading = players.length === 0;
+  const isEmpty = players.length === 0;
 
   return (
     <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-6 h-full">
@@ -24,16 +24,10 @@ export default function PlayerList({ players, currentUserId }: PlayerListProps) 
         플레이어 ({players.length})
       </h2>
       
-      {isLoading ? (
-        <div className="flex flex-col items-center justify-center h-48 text-gray-400">
-          <div className="animate-pulse mb-3">
-            <svg className="animate-spin h-8 w-8 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-          </div>
-          <p>플레이어 목록을 불러오는 중입니다...</p>
-          <p className="text-xs mt-2 text-gray-500">서버 연결 중... 잠시만 기다려주세요.</p>
+      {isEmpty ? (
+        <div className="text-center py-8 text-gray-400">
+          <p>현재 방에 플레이어가 없습니다.</p>
+          <p className="text-sm mt-2">다른 플레이어들이 입장하기를 기다려주세요.</p>
         </div>
       ) : (
         <div className="space-y-3 max-h-[calc(100vh-24rem)] overflow-y-auto pr-2">
@@ -95,14 +89,6 @@ export default function PlayerList({ players, currentUserId }: PlayerListProps) 
               </div>
             </div>
           ))}
-          
-          {/* 방에 아무도 없을 때의 대체 메시지 - 실제로는 표시될 일이 거의 없을 것 */}
-          {!isLoading && players.length === 0 && (
-            <div className="text-center py-8 text-gray-400">
-              <p>현재 방에 플레이어가 없습니다.</p>
-              <p className="text-sm mt-2">다른 플레이어들이 입장하기를 기다려주세요.</p>
-            </div>
-          )}
         </div>
       )}
     </div>

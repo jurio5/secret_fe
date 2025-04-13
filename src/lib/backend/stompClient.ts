@@ -133,12 +133,24 @@ const performSubscribe = (
   destination: string,
   callback: (message: any) => void
 ) => {
+  console.log(`구독 시작: ${destination}`);
+  
   const subscription = stompClient.subscribe(destination, (message) => {
+    console.log(`메시지 수신 (${destination}):`, message.body);
+    
+    // 채팅 메시지 전용 처리 추가
+    if (destination.includes('/chat/')) {
+      console.log(`채팅 메시지 수신 감지 (${destination})`);
+    }
+    
     try {
       // JSON 파싱 시도
       const parsedMessage = JSON.parse(message.body);
+      console.log("JSON 파싱 성공:", parsedMessage);
       callback(parsedMessage);
     } catch (error) {
+      console.log("JSON 파싱 실패, 다른 방식으로 시도:", error);
+      
       // JSON 파싱 실패 시 Java 객체 문자열 파싱 시도
       if (message.body.includes("WebSocketChatMessageResponse[")) {
         const javaObject = parseJavaObjectString(message.body);
@@ -161,27 +173,64 @@ const performSubscribe = (
         return;
       }
       
-      // JSON 파싱 및 Java 객체 파싱 모두 실패 시 원본 메시지를 전달하고 로그 출력
-      console.warn(`메시지 파싱 실패 (${destination}):`, error);
-      console.debug("원본 메시지:", message.body);
-      
-      // 채팅 메시지 특수 처리 (/topic/lobby/chat 등)
+      // 채팅 메시지 특수 처리
       if (destination.includes('/chat')) {
-        // 채팅 메시지용 기본 객체 생성
-        callback({
-          type: "CHAT",
-          content: message.body,
-          senderId: "system",
-          senderName: "System",
-          timestamp: Date.now(),
-          roomId: destination.split('/').pop() || "unknown"
-        });
+        console.log(`채팅 메시지 처리 시도 (${destination}):`, message.body);
+        
+        try {
+          // 문자열이 아닌 경우 처리
+          if (typeof message.body !== 'string') {
+            console.log("채팅 메시지가 문자열이 아님. 직접 전달:", message.body);
+            callback(message.body);
+            return;
+          }
+          
+          // 문자열에서 중괄호 추출 시도
+          const bracketMatch = message.body.match(/{.*}/);
+          if (bracketMatch) {
+            try {
+              const jsonContent = JSON.parse(bracketMatch[0]);
+              console.log("중괄호에서 JSON 추출 성공:", jsonContent);
+              callback(jsonContent);
+              return;
+            } catch (e) {
+              console.log("중괄호 내용 파싱 실패:", e);
+            }
+          }
+          
+          // 채팅 메시지용 기본 객체 생성
+          console.log("기본 채팅 메시지 객체 생성");
+          const roomId = destination.includes('/chat/') 
+            ? destination.split('/chat/')[1] 
+            : destination.split('/').pop() || "unknown";
+          
+          callback({
+            type: "CHAT",
+            content: message.body,
+            senderId: "system",
+            senderName: "System",
+            timestamp: Date.now(),
+            roomId: roomId
+          });
+        } catch (chatError) {
+          console.error("채팅 메시지 처리 중 오류:", chatError);
+          callback({
+            type: "SYSTEM",
+            content: "메시지 처리 중 오류가 발생했습니다.",
+            senderId: "system",
+            senderName: "System",
+            timestamp: Date.now()
+          });
+        }
       } else {
         // 기타 메시지는 원본 반환
+        console.log("기타 메시지 원본 반환:", message.body);
         callback(message.body);
       }
     }
   });
+  
+  console.log(`구독 완료: ${destination}`);
   activeSubscriptions[destination] = subscription;
 };
 

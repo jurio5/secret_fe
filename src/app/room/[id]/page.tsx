@@ -67,6 +67,39 @@ function RoomContent() {
   
   // 채팅 관련 상태
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const chatMessagesRef = useRef<ChatMessage[]>([]);
+  
+  // 채팅 메시지 상태 업데이트 함수
+  const updateChatMessages = (newMessage: ChatMessage) => {
+    // 중복 메시지 검사 (ref로 저장된 최신 메시지 기준)
+    const isDuplicate = chatMessagesRef.current.some(existingMsg => 
+      existingMsg.timestamp === newMessage.timestamp && 
+      existingMsg.content === newMessage.content &&
+      existingMsg.senderId === newMessage.senderId
+    );
+    
+    // 중복 메시지면 무시
+    if (isDuplicate) {
+      console.log("중복 메시지 무시:", newMessage);
+      return;
+    }
+    
+    // 메시지에 고유 ID 추가
+    const messageWithId: ChatMessage = {
+      ...newMessage,
+      id: newMessage.id || `${newMessage.senderId}-${newMessage.timestamp}-${Math.random().toString(36).substr(2, 5)}`,
+      avatarUrl: newMessage.avatarUrl || DEFAULT_AVATAR
+    };
+    
+    console.log("새 메시지 추가:", messageWithId);
+    
+    // 상태와 ref 모두 업데이트
+    setChatMessages(prev => {
+      const updated = [...prev, messageWithId];
+      chatMessagesRef.current = updated; // ref도 함께 업데이트
+      return updated;
+    });
+  };
   
   // 방 정보 가져오기
   const fetchRoomData = async () => {
@@ -258,29 +291,18 @@ function RoomContent() {
     });
     
     // 채팅 메시지 구독
-    subscribe(`/topic/room/${roomId}/chat`, (message) => {
-      // 중복 메시지 검사
-      const isDuplicate = chatMessages.some(existingMsg => 
-        existingMsg.timestamp === message.timestamp && 
-        existingMsg.content === message.content &&
-        existingMsg.senderId === message.senderId
-      );
+    subscribe(`/topic/room/chat/${roomId}`, (message) => {
+      console.log("채팅 메시지 수신:", message);
+      console.log("채팅 메시지 타입:", typeof message);
+      console.log("채팅 메시지 JSON:", JSON.stringify(message, null, 2));
+      console.log("현재 메시지 목록 길이:", chatMessagesRef.current.length);
       
-      // 중복 메시지면 무시
-      if (isDuplicate) {
-        console.log("중복 메시지 무시:", message);
-        return;
+      try {
+        // 메시지 처리 및 추가
+        updateChatMessages(message);
+      } catch (error) {
+        console.error("채팅 메시지 처리 중 오류:", error);
       }
-      
-      // 메시지에 고유 ID 추가
-      const messageWithId: ChatMessage = {
-        ...message,
-        id: `${message.senderId}-${message.timestamp}-${Math.random().toString(36).substr(2, 5)}`,
-        avatarUrl: message.avatarUrl || DEFAULT_AVATAR
-      };
-      
-      // 메시지 추가
-      setChatMessages(prev => [...prev, messageWithId]);
     });
     
     setIsConnected(true);
@@ -297,12 +319,16 @@ function RoomContent() {
       });
       
       // 입장 메시지 발행
-      publish(`/app/room/${roomId}/join`, {
-        roomId: parseInt(roomId)
+      publish(`/app/room/chat/${roomId}`, {
+        type: "SYSTEM",
+        content: `${currentUser.nickname}님이 입장했습니다.`,
+        senderId: "system",
+        senderName: "System",
+        timestamp: Date.now()
       });
       
       // 입장 시스템 메시지
-      publish(`/app/room/${roomId}/chat`, {
+      publish(`/app/room/chat/${roomId}`, {
         type: "SYSTEM",
         content: `${currentUser.nickname}님이 입장했습니다.`,
         senderId: "system",
@@ -345,7 +371,7 @@ function RoomContent() {
       
       // 퇴장 메시지 발행
       if (currentUser) {
-        publish(`/app/room/${roomId}/chat`, {
+        publish(`/app/room/chat/${roomId}`, {
           type: "SYSTEM",
           content: `${currentUser.nickname}님이 퇴장했습니다.`,
           senderId: "system",
@@ -367,7 +393,7 @@ function RoomContent() {
       unsubscribe(`/topic/room/${roomId}`);
       unsubscribe(`/topic/room/${roomId}/players`);
       unsubscribe(`/topic/room/${roomId}/status`);
-      unsubscribe(`/topic/room/${roomId}/chat`);
+      unsubscribe(`/topic/room/chat/${roomId}`);
       
       // 로비로 이동
       localStorage.setItem('intentional_navigation', 'true');
@@ -398,7 +424,7 @@ function RoomContent() {
       
       // 메시지 발행
       if (currentUser) {
-        publish(`/app/room/${roomId}/chat`, {
+        publish(`/app/room/chat/${roomId}`, {
           type: "SYSTEM",
           content: `${currentUser.nickname}님이 ${newReadyState ? '준비 완료' : '준비 취소'}하였습니다.`,
           senderId: "system",
@@ -468,7 +494,7 @@ function RoomContent() {
       });
       
       // 게임 시작 메시지 발행
-      publish(`/app/room/${roomId}/chat`, {
+      publish(`/app/room/chat/${roomId}`, {
         type: "SYSTEM",
         content: "게임이 시작되었습니다!",
         senderId: "system",
@@ -495,13 +521,22 @@ function RoomContent() {
   const sendChatMessage = (message: string) => {
     if (!message.trim() || !currentUser) return;
     
-    // 서버로 채팅 메시지 발행
-    publish(`/app/room/${roomId}/chat`, {
-      type: "CHAT",
+    // 메시지 객체 생성
+    const chatMessage = {
+      type: "CHAT" as const,
       content: message,
       senderId: currentUser.id.toString(),
       senderName: currentUser.nickname,
       timestamp: Date.now()
+    };
+    
+    // 서버로 채팅 메시지 발행
+    publish(`/app/room/chat/${roomId}`, chatMessage);
+    
+    // 메시지를 바로 화면에 표시 (옵티미스틱 업데이트)
+    updateChatMessages({
+      ...chatMessage,
+      avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR
     });
   };
   
@@ -528,14 +563,49 @@ function RoomContent() {
           // 방장 여부 확인
           setIsOwner(roomData.ownerId === userData.id);
           
-          // 시스템 메시지 추가 - 환영 메시지
-          setChatMessages([{
-            type: "SYSTEM",
+          // 초기 시스템 메시지 추가 - 환영 메시지
+          const initialMessage = {
+            id: `system-${Date.now()}-welcome`,
+            type: "SYSTEM" as const,
             content: "채팅방에 입장했습니다. 환영합니다!",
             senderId: "system",
             senderName: "System",
-            timestamp: Date.now()
-          }]);
+            timestamp: Date.now(),
+            avatarUrl: DEFAULT_AVATAR
+          };
+          
+          console.log("초기 채팅 메시지 추가:", initialMessage);
+          setChatMessages([initialMessage]);
+          chatMessagesRef.current = [initialMessage]; // ref도 함께 초기화
+          
+          // 플레이어 목록 초기화 - 자신을 포함한 목록 생성
+          if (roomData.players && roomData.players.length > 0) {
+            console.log("초기 플레이어 목록:", roomData.players);
+            
+            // 기본 처리: 플레이어 ID가 있는 경우, 자신을 추가
+            if (userData) {
+              setPlayers([{
+                id: userData.id.toString(),
+                nickname: userData.nickname,
+                avatarUrl: userData.avatarUrl || DEFAULT_AVATAR,
+                isOwner: roomData.ownerId === userData.id,
+                isReady: false
+              }]);
+              
+              console.log("초기 플레이어 설정 - 자신만:", userData);
+            }
+          } else if (userData) {
+            // 방에 자신만 있는 경우
+            setPlayers([{
+              id: userData.id.toString(),
+              nickname: userData.nickname, 
+              avatarUrl: userData.avatarUrl || DEFAULT_AVATAR,
+              isOwner: roomData.ownerId === userData.id,
+              isReady: false
+            }]);
+            
+            console.log("초기 플레이어 설정 - 자신만:", userData);
+          }
         }
       } catch (error) {
         console.error("초기화 중 오류 발생:", error);
@@ -553,7 +623,7 @@ function RoomContent() {
       unsubscribe(`/topic/room/${roomId}`);
       unsubscribe(`/topic/room/${roomId}/players`);
       unsubscribe(`/topic/room/${roomId}/status`);
-      unsubscribe(`/topic/room/${roomId}/chat`);
+      unsubscribe(`/topic/room/chat/${roomId}`);
     };
   }, [roomId]);
   
@@ -682,6 +752,7 @@ function RoomContent() {
             messages={chatMessages}
             currentUserId={currentUser?.id || null}
             onSendMessage={sendChatMessage}
+            key={`chat-${roomId}-${chatMessages.length}`}
           />
         </div>
       </div>
