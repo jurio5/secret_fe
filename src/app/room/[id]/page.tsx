@@ -261,6 +261,9 @@ export default function RoomPage() {
               setPlayers(formattedPlayers);
               console.log("플레이어 목록 완전 교체:", formattedPlayers);
               
+              // 방장 정보 업데이트 - owner 속성이 있는 사람을 찾음
+              const ownerPlayer = formattedPlayers.find((p: any) => p.isOwner);
+              
               // 현재 사용자의 준비 상태 확인
               if (currentUserId) {
                 const currentPlayer = formattedPlayers.find((player: any) => {
@@ -271,6 +274,12 @@ export default function RoomPage() {
                 
                 if (currentPlayer) {
                   setIsReady(currentPlayer.isReady || false);
+                  
+                  // 현재 사용자가 방장인지 여부 확인 및 업데이트
+                  if (currentPlayer.isOwner !== isOwner) {
+                    setIsOwner(currentPlayer.isOwner || false);
+                    console.log(`현재 사용자 방장 여부 변경: ${currentPlayer.isOwner}`);
+                  }
                 }
               }
               
@@ -278,9 +287,20 @@ export default function RoomPage() {
               if (room) {
                 setRoom(prevRoom => {
                   if (!prevRoom) return prevRoom;
+                  
+                  // 방장 정보가 있으면 함께 업데이트
+                  const updates: any = {
+                    currentPlayers: formattedPlayers.length
+                  };
+                  
+                  if (ownerPlayer) {
+                    updates.ownerId = ownerPlayer.id;
+                    updates.ownerNickname = ownerPlayer.nickname || ownerPlayer.name;
+                  }
+                  
                   return {
                     ...prevRoom,
-                    currentPlayers: formattedPlayers.length
+                    ...updates
                   };
                 });
               }
@@ -379,11 +399,30 @@ export default function RoomPage() {
         if (status.room) {
           setRoom(prevRoom => {
             if (!prevRoom) return status.room;
-            return {
+            // 방장 변경이나 인원수 변경 등의 정보를 반영
+            const updatedRoom = {
               ...prevRoom,
               ...status.room,
             };
+            
+            // 인원수와 방장 정보 업데이트 로그
+            if (prevRoom.ownerId !== updatedRoom.ownerId) {
+              console.log(`방장 변경: ${prevRoom.ownerNickname} -> ${updatedRoom.ownerNickname || "알 수 없음"}`);
+            }
+            
+            if (prevRoom.currentPlayers !== updatedRoom.currentPlayers) {
+              console.log(`인원수 변경: ${prevRoom.currentPlayers}명 -> ${updatedRoom.currentPlayers}명`);
+            }
+            
+            return updatedRoom;
           });
+          
+          // 방장 변경 시 isOwner 상태 업데이트
+          if (status.room.ownerId && currentUserId) {
+            const isCurrentUserOwner = String(status.room.ownerId) === String(currentUserId);
+            setIsOwner(isCurrentUserOwner);
+            console.log(`현재 사용자 방장 여부: ${isCurrentUserOwner}`);
+          }
         }
         
         if (status.gameStatus) {
