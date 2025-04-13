@@ -69,6 +69,24 @@ function RoomContent() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const chatMessagesRef = useRef<ChatMessage[]>([]);
   
+  // 플레이어 목록이 변경될 때 방 정보의 currentPlayers 자동 업데이트
+  useEffect(() => {
+    if (room && players.length !== room.currentPlayers) {
+      console.log("플레이어 수 동기화:", { 
+        before: room.currentPlayers, 
+        after: players.length 
+      });
+      
+      setRoom(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          currentPlayers: players.length
+        };
+      });
+    }
+  }, [players, room]);
+  
   // 방 정보 가져오기
   const fetchRoomData = async () => {
     try {
@@ -144,6 +162,38 @@ function RoomContent() {
       if (data && data.type) {
         // 방 정보 업데이트
         if (data.type === 'ROOM_UPDATED' || data.type === 'JOIN' || data.type === 'LEAVE') {
+          console.log(`${data.type} 이벤트 발생:`, data);
+          
+          // JOIN/LEAVE 이벤트 발생 시 강제로 방 정보 갱신 API 호출
+          if (data.type === 'JOIN' || data.type === 'LEAVE') {
+            // 약간의 지연 후 API로 방 정보 갱신 (서버 처리 시간 고려)
+            setTimeout(async () => {
+              try {
+                const response = await client.GET(`/api/v1/rooms/{roomId}`, {
+                  params: { path: { roomId: parseInt(roomId) } }
+                }) as ApiResponse<RoomResponse>;
+                
+                if (response.data?.data) {
+                  const roomData = response.data.data;
+                  console.log(`${data.type} 이후 방 정보 갱신:`, roomData);
+                  
+                  // 방 정보 업데이트
+                  setRoom(prevRoom => {
+                    if (!prevRoom) return roomData;
+                    return {
+                      ...prevRoom,
+                      ...roomData,
+                      // 플레이어 목록 길이 기반으로 currentPlayers 강제 설정
+                      currentPlayers: roomData.players?.length || 0
+                    };
+                  });
+                }
+              } catch (error) {
+                console.error("방 정보 갱신 실패:", error);
+              }
+            }, 300);
+          }
+          
           setRoom(prev => {
             if (!prev) return data;
             return { ...prev, ...data };
@@ -705,7 +755,19 @@ function RoomContent() {
               console.log("방 정보 API 응답:", roomData);
               
               // 방 정보 업데이트 
-              setRoom(roomData);
+              setRoom(prevRoom => {
+                if (!roomData) return prevRoom;
+                
+                // 방 정보에서 플레이어 ID 목록 추출
+                if (roomData.players && roomData.players.length > 0) {
+                  // currentPlayers 값을 실제 players 배열 길이로 업데이트
+                  return {
+                    ...roomData,
+                    currentPlayers: roomData.players.length
+                  };
+                }
+                return roomData;
+              });
               
               // 방 정보에서 플레이어 ID 목록 추출
               if (roomData.players && roomData.players.length > 0) {
@@ -909,6 +971,7 @@ function RoomContent() {
         room={room}
         roomId={roomId}
         onLeave={leaveRoom}
+        playersCount={players.length}
       />
       
       {/* 메인 컨텐츠 - 플레이어 목록과 채팅창 */}

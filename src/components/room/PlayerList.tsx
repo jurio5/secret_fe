@@ -2,6 +2,7 @@
 
 import { FaCrown, FaCheckCircle } from "react-icons/fa";
 import { PlayerProfile } from "../../lib/types/room";
+import { useEffect, useState } from "react";
 
 // 기본 프로필 이미지 URL
 const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';
@@ -12,13 +13,28 @@ interface PlayerListProps {
 }
 
 export default function PlayerList({ players, currentUserId }: PlayerListProps) {
+  const [cachedPlayers, setCachedPlayers] = useState<PlayerProfile[]>([]);
+  
+  // 플레이어 목록이 비어있지 않은 경우에만 캐시 업데이트
+  useEffect(() => {
+    if (players.length > 0) {
+      console.log("플레이어 목록 캐시 업데이트:", players);
+      setCachedPlayers(players);
+    }
+  }, [players]);
+  
+  // 실제 렌더링에 사용할 플레이어 목록
+  const displayPlayers = players.length > 0 ? players : cachedPlayers;
+  
   // 로딩 중 상태 처리 - 플레이어 목록이 빈 배열일 때
-  const isEmpty = players.length === 0;
+  const isEmpty = displayPlayers.length === 0;
   
   console.log("PlayerList 렌더링:", { 
     isEmpty, 
-    playersCount: players.length, 
-    players,
+    playersCount: displayPlayers.length, 
+    playersOriginal: players.length,
+    cachedPlayersCount: cachedPlayers.length,
+    displayPlayers,
     currentUserId 
   });
 
@@ -28,7 +44,7 @@ export default function PlayerList({ players, currentUserId }: PlayerListProps) 
         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-indigo-400" viewBox="0 0 20 20" fill="currentColor">
           <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z" />
         </svg>
-        플레이어 ({players.length})
+        플레이어 ({displayPlayers.length})
       </h2>
       
       {isEmpty ? (
@@ -38,7 +54,7 @@ export default function PlayerList({ players, currentUserId }: PlayerListProps) 
         </div>
       ) : (
         <div className="space-y-3 max-h-[calc(100vh-24rem)] overflow-y-auto pr-2">
-          {players.map((player) => (
+          {displayPlayers.map((player) => (
             <div 
               key={player.id} 
               className={`flex items-center gap-3 p-3 rounded-lg ${

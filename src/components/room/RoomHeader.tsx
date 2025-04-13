@@ -7,9 +7,10 @@ interface RoomHeaderProps {
   room: RoomResponse | null;
   roomId: string;
   onLeave: () => void;
+  playersCount?: number; // 실제 플레이어 수를 props로 받음
 }
 
-export default function RoomHeader({ room, roomId, onLeave }: RoomHeaderProps) {
+export default function RoomHeader({ room, roomId, onLeave, playersCount }: RoomHeaderProps) {
   // 난이도 텍스트 변환
   const getDifficultyText = (difficulty?: string) => {
     switch (difficulty) {
@@ -62,6 +63,9 @@ export default function RoomHeader({ room, roomId, onLeave }: RoomHeaderProps) {
       </div>
     );
   }
+
+  // 플레이어 수 표시에 props로 받은 값을 우선 사용, 없으면 room.currentPlayers 사용
+  const currentPlayersDisplay = playersCount !== undefined ? playersCount : (room.players?.length || room.currentPlayers || 0);
   
   return (
     <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-5 mb-5">
@@ -80,7 +84,7 @@ export default function RoomHeader({ room, roomId, onLeave }: RoomHeaderProps) {
             </span>
             <span className="flex items-center">
               <FaUsers className="mr-1.5" />
-              {room.currentPlayers}/{room.capacity}명
+              {currentPlayersDisplay}/{room.capacity}명
             </span>
             <span className="flex items-center">
               <FaInfoCircle className="mr-1.5" />
