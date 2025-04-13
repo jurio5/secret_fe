@@ -47,19 +47,25 @@ const FriendList: React.FC<FriendListProps> = ({ friendList, isLoading, onDelete
                 <div className="flex items-center space-x-3">
                   <div className="relative flex-shrink-0 h-10 w-10">
                     {friend.avatarUrl ? (
-                      <Image
-                        src={friend.avatarUrl}
-                        alt={friend.nickname || ''}
-                        width={40}
-                        height={40}
-                        className="rounded-full object-cover"
-                      />
+                      <div className="relative h-10 w-10 rounded-full overflow-hidden border-2 border-gray-700">
+                        <Image
+                          src={friend.avatarUrl}
+                          alt={friend.nickname || ''}
+                          fill
+                          sizes="40px"
+                          className="object-cover"
+                        />
+                      </div>
                     ) : (
-                      <div className="rounded-full bg-gradient-to-r from-blue-400 to-indigo-500 h-10 w-10 flex items-center justify-center text-white font-medium">
+                      <div className="rounded-full bg-gradient-to-r from-blue-400 to-indigo-500 h-10 w-10 flex items-center justify-center text-white font-medium border-2 border-gray-700">
                         {friend.nickname?.[0] || '?'}
                       </div>
                     )}
-                    <div className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-gray-800 ${friend.isOnline ? 'bg-green-500' : 'bg-gray-500'}`}></div>
+                    <div className={`absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-gray-800 flex items-center justify-center ${friend.isOnline ? 'bg-green-500' : 'bg-gray-500'}`}>
+                      {friend.isOnline && (
+                        <div className="h-2 w-2 rounded-full bg-white animate-pulse"></div>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <div className="font-medium text-white">{friend.nickname}</div>
@@ -71,16 +77,20 @@ const FriendList: React.FC<FriendListProps> = ({ friendList, isLoading, onDelete
               </td>
               <td className="py-3 text-center">
                 {friend.isOnline ? (
-                  <span className="px-2 py-1 text-xs rounded-full bg-green-500/20 text-green-400">
+                  <span className="px-2.5 py-1.5 text-xs font-medium rounded-full bg-green-500/20 text-green-300 border border-green-500/30">
                     온라인
                   </span>
                 ) : (
-                  <span className="px-2 py-1 text-xs rounded-full bg-gray-700/30 text-gray-400">
+                  <span className="px-2.5 py-1.5 text-xs font-medium rounded-full bg-gray-700/30 text-gray-400 border border-gray-600/30">
                     오프라인
                   </span>
                 )}
               </td>
-              <td className="py-3 text-center font-medium">{friend.level}</td>
+              <td className="py-3 text-center">
+                <span className="font-medium text-blue-300 bg-blue-900/30 px-2.5 py-1 rounded-lg border border-blue-500/20">
+                  Lv.{friend.level}
+                </span>
+              </td>
               <td className="py-3 px-2 text-right">
                 <button
                   onClick={() => onDeleteFriend(friend.memberId)}
