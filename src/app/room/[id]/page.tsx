@@ -1,15 +1,24 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import AppLayout from "@/components/common/AppLayout";
 import client from "@/lib/backend/client";
-import { subscribe, unsubscribe, publish, reconnectWebSocket, isConnected } from "@/lib/backend/stompClient";
-import Image from "next/image";
-import { FaChevronLeft, FaDoorOpen, FaCrown, FaCheck, FaComments, FaUsers, FaInfoCircle, FaPlay } from "react-icons/fa";
-import { RoomResponse, PlayerProfile, RoomStatus, RoomMessageType } from "../../../lib/types/room";
+import { components } from "@/lib/backend/apiV1/schema";
+import { subscribe, unsubscribe, publish, reconnectWebSocket } from "@/lib/backend/stompClient";
+import Toast, { ToastProps } from "@/components/common/Toast";
+import { FaCrown, FaUsers, FaDoorOpen, FaInfoCircle, FaComments, FaCheckCircle } from "react-icons/fa";
+
+// 컴포넌트 임포트
 import PlayerList from "@/components/room/PlayerList";
+import RoomChat from "@/components/room/RoomChat";
 import RoomHeader from "@/components/room/RoomHeader";
+
+// 타입 임포트
+import { RoomResponse, PlayerProfile } from "@/lib/types/room";
+
+// 기본 아바타 URL
+const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';
 
 // API 응답 타입
 type ApiResponse<T> = {
@@ -21,99 +30,76 @@ type ApiResponse<T> = {
   };
 };
 
-// 기본 프로필 이미지 URL
-const DEFAULT_PROFILE_IMAGE = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';
+// 유저 정보 타입
+interface User {
+  id: number;
+  email: string;
+  nickname: string;
+  avatarUrl?: string;
+  status: string;
+}
 
-export default function RoomPage() {
+// 채팅 메시지 타입
+interface ChatMessage {
+  id?: string;
+  type: "CHAT" | "SYSTEM";
+  content: string;
+  senderId: string;
+  senderName: string;
+  timestamp: number;
+  avatarUrl?: string;
+}
+
+function RoomContent() {
   const params = useParams();
   const roomId = params.id as string;
+  const router = useRouter();
+  
   const [room, setRoom] = useState<RoomResponse | null>(null);
+  const [players, setPlayers] = useState<PlayerProfile[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isOwner, setIsOwner] = useState<boolean>(false);
+  const [isReady, setIsReady] = useState<boolean>(false);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [players, setPlayers] = useState<PlayerProfile[]>([]);
-  const [isOwner, setIsOwner] = useState<boolean>(false);
-  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [isReady, setIsReady] = useState<boolean>(false);
-  const [gameStatus, setGameStatus] = useState<RoomStatus>("WAITING");
-  const [activeTab, setActiveTab] = useState<'players' | 'chat'>('players');
-  
-  // 플레이어 목록 초기화 여부 추적
-  const playersInitialized = useRef<boolean>(false);
+  const [toast, setToast] = useState<ToastProps | null>(null);
   
   // 채팅 관련 상태
-  const [chatMessages, setChatMessages] = useState<any[]>([]);
-  const [newChatMessage, setNewChatMessage] = useState<string>("");
-  const [isComposing, setIsComposing] = useState<boolean>(false);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-
-  // 상태 ref 추가
-  const currentUserIdRef = useRef<number | null>(null);
-  const currentUserRef = useRef<any>(null);
-
-  // 디버깅 컨트롤
-  const debug = (message: string, data?: any) => {
-    console.log(`[디버그] ${message}`, data || '');
-  };
-
-  // 방장 확인 헬퍼 함수
-  const isUserRoomOwner = (roomData: RoomResponse | null, userId: number | null): boolean => {
-    if (!roomData || !userId) return false;
-    
-    // 두 값을 문자열로 변환하여 비교
-    const roomOwnerId = roomData.ownerId?.toString();
-    const userIdStr = userId.toString();
-    
-    const isOwner = roomOwnerId === userIdStr;
-    debug("방장 확인 로직", {
-      userId: userIdStr,
-      roomOwnerId: roomOwnerId,
-      isOwner: isOwner
-    });
-    
-    return isOwner;
-  };
-
-  // 방 정보 불러오기
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  
+  // 방 정보 가져오기
   const fetchRoomData = async () => {
-    setLoading(true);
     try {
-      debug("방 정보 요청 시작", roomId);
-      const response = await (client.GET as any)(`/api/v1/rooms/${roomId}`, {}) as ApiResponse<RoomResponse>;
+      const response = await client.GET(`/api/v1/rooms/{roomId}`, {
+        params: { path: { roomId: parseInt(roomId) } }
+      }) as ApiResponse<RoomResponse>;
       
       if (response.error) {
         setError(response.error.message || "방 정보를 불러오는데 실패했습니다.");
-        return;
+        return null;
       }
       
       if (response.data?.data) {
+        console.log("방 정보:", response.data.data);
         const roomData = response.data.data;
-        debug("방 정보 로드 성공", roomData);
         setRoom(roomData);
-        
-        // 방장 여부 확인 - 헬퍼 함수 사용
-        const isCurrentUserOwner = isUserRoomOwner(roomData, currentUserId);
-        setIsOwner(isCurrentUserOwner);
-        
-        if (isCurrentUserOwner) {
-          debug("현재 사용자는 방장입니다");
-        }
-      } else {
-        setError("방 정보를 불러오는데 실패했습니다.");
+        return roomData;
       }
+      
+      setError("방 정보를 불러오는데 실패했습니다.");
+      return null;
     } catch (error) {
       console.error("방 정보를 불러오는데 실패했습니다:", error);
       setError("방 정보를 불러오는데 실패했습니다.");
-    } finally {
-      setLoading(false);
+      return null;
     }
   };
-
+  
   // 현재 사용자 정보 가져오기
   const fetchCurrentUser = async () => {
     try {
-      debug("사용자 정보 요청 시작");
-      const response = await client.GET("/api/v1/members/me", {}) as any;
+      const response = await client.GET("/api/v1/members/me") as ApiResponse<User>;
       
       if (response.error) {
         console.error("사용자 정보를 가져오는데 실패했습니다:", response.error);
@@ -122,939 +108,591 @@ export default function RoomPage() {
       
       if (response.data?.data) {
         const userData = response.data.data;
-        debug("사용자 정보 로드 성공", userData);
-        
-        setCurrentUserId(userData.id);
-        currentUserIdRef.current = userData.id; // ref에 저장
-        
         setCurrentUser(userData);
-        currentUserRef.current = userData; // ref에 저장
         
-        // 방장 여부 확인 (room이 이미 로드된 경우) - 헬퍼 함수 사용
-        if (room) {
-          const isCurrentUserOwner = isUserRoomOwner(room, userData.id);
-          setIsOwner(isCurrentUserOwner);
-          
-          if (isCurrentUserOwner) {
-            debug("현재 사용자는 방장입니다");
-          }
+        // 방장 여부 확인
+        if (room && room.ownerId === userData.id) {
+          setIsOwner(true);
         }
         
         return userData;
       }
+      
       return null;
     } catch (error) {
       console.error("사용자 정보를 가져오는데 실패했습니다:", error);
       return null;
     }
   };
-
-  // 방 참가자 정보 직접 로드하는 함수 추가
-  const fetchRoomPlayers = async (): Promise<PlayerProfile[] | undefined> => {
-    try {
-      debug("참가자 목록 직접 로드 요청");
-      
-      // 방 참가자 정보 API 호출
-      const response = await (client.GET as any)(`/api/v1/rooms/${roomId}/members`, {}) as ApiResponse<any[]>;
-      
-      if (response.error) {
-        console.error("참가자 목록 로드 실패:", response.error);
-        return [];
-      }
-      
-      if (response.data?.data) {
-        const playersData = response.data.data;
-        debug("참가자 목록 로드 성공:", playersData);
-        
-        // 유저 ID ref 사용
-        const userId = currentUserIdRef.current;
-        let hasCurrentUser = false;
-        
-        // 플레이어 데이터 형식 통일화
-        const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
-          // ID가 숫자면 문자열로 변환
-          const id = typeof player.id === 'number' ? String(player.id) : player.id;
-          
-          // 현재 사용자가 목록에 있는지 확인
-          if (userId && id === userId.toString()) {
-            hasCurrentUser = true;
-          }
-          
-          // 방장 여부 확인
-          const isPlayerOwner = Boolean(player.isOwner === true || 
-            (room?.ownerId && id === room.ownerId.toString()));
-          
-          return {
-            id,
-            nickname: player.nickname || player.name || '사용자',
-            profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
-            isOwner: isPlayerOwner,
-            ready: Boolean(player.ready || player.isReady),
-            status: player.status || "WAITING",
-            score: player.score || 0
-          };
-        });
-        
-        // 현재 유저가 목록에 없고 방에 입장 중인 경우 자신을 추가
-        if (!hasCurrentUser && userId && room) {
-          debug("참가자 목록에 현재 사용자가 없음, 자신을 추가");
-          const isCurrentUserOwner = isUserRoomOwner(room, userId);
-          const selfPlayer: PlayerProfile = {
-            id: userId.toString(),
-            nickname: currentUserRef.current?.nickname || "사용자",
-            profileImage: currentUserRef.current?.profileImage || DEFAULT_PROFILE_IMAGE,
-            isOwner: isCurrentUserOwner,
-            ready: isReady,
-            status: "WAITING",
-            score: 0
-          };
-          formattedPlayers.push(selfPlayer);
-          debug("참가자 목록에 자신을 추가", selfPlayer);
-        }
-        
-        setPlayers(formattedPlayers);
-        debug("참가자 목록 업데이트 완료", formattedPlayers);
-        
-        return formattedPlayers;
-      }
-      return [];
-    } catch (error) {
-      console.error("참가자 목록 로드 중 오류:", error);
-      return [];
-    }
+  
+  // 플레이어 목록에서 자신의 준비 상태 확인
+  const checkReadyStatus = () => {
+    if (!currentUser || !room?.readyPlayers) return;
+    
+    const isUserReady = room.readyPlayers.includes(currentUser.id);
+    setIsReady(isUserReady);
   };
-
+  
   // 웹소켓 구독 설정
   const setupWebSocket = () => {
-    debug("웹소켓 구독 설정", roomId);
-
-    // 먼저 이전 구독이 있다면 정리
-    unsubscribe(`/topic/room/${roomId}`);
-    unsubscribe(`/topic/player/${roomId}`);
-    unsubscribe(`/topic/room/chat/${roomId}`);
-    unsubscribe(`/topic/chat/room/${roomId}`);
-    unsubscribe(`/topic/game/chat/${roomId}`);
-    
-    // 웹소켓 연결이 완전히 준비될 때까지 약간의 지연 추가
-    const trySubscribe = (retryCount = 0, maxRetries = 3) => {
-      if (!isConnected()) {
-        if (retryCount < maxRetries) {
-          debug(`웹소켓 연결 대기 중... (${retryCount + 1}/${maxRetries + 1})`);
-          // 500ms 후 재시도
-          setTimeout(() => trySubscribe(retryCount + 1, maxRetries), 500);
-          return;
-        }
-        
-        // 최대 재시도 횟수 초과
-        debug("웹소켓 연결 실패, 재연결 시도");
-        const reconnected = reconnectWebSocket();
-        if (!reconnected) {
-          debug("웹소켓 재연결 실패, 구독 설정 중단");
-          setError("웹소켓 연결에 실패했습니다. 페이지를 새로고침해주세요.");
-          return false;
-        }
-        
-        // 재연결 후 구독을 위해 약간의 지연
-        setTimeout(() => performSubscriptions(), 1000);
-      } else {
-        performSubscriptions();
-      }
-    };
-    
-    // 실제 구독 로직
-    const performSubscriptions = () => {
-      debug("구독 설정 시작");
+    // 방 정보 업데이트 구독
+    subscribe(`/topic/room/${roomId}`, (data) => {
+      console.log("방 정보 업데이트:", data);
       
+      // 메시지 타입이 있는 경우 처리
+      if (data && data.type) {
+        // 방 정보 업데이트
+        if (data.type === 'ROOM_UPDATED' || data.type === 'JOIN' || data.type === 'LEAVE') {
+          setRoom(prev => {
+            if (!prev) return data;
+            return { ...prev, ...data };
+          });
+          
+          // 플레이어 정보가 포함된 경우 처리
+          if (data.players) {
+            setPlayers(data.players);
+            
+            // 방장 여부 확인
+            if (currentUser && data.ownerId === currentUser.id) {
+              setIsOwner(true);
+            } else {
+              setIsOwner(false);
+            }
+            
+            // 준비 상태 확인
+            checkReadyStatus();
+          }
+        }
+      } else if (data && typeof data === 'object') {
+        // 단순 객체인 경우 (방 정보만 담긴 형태)
+        setRoom(prev => {
+          if (!prev) return data;
+          return { ...prev, ...data };
+        });
+      }
+    });
+    
+    // 플레이어 목록 구독
+    subscribe(`/topic/room/${roomId}/players`, (data) => {
+      console.log("플레이어 목록 업데이트:", data);
+      
+      if (Array.isArray(data)) {
+        // 플레이어 목록 처리
+        const formattedPlayers = data.map(player => ({
+          id: player.id.toString(),
+          nickname: player.nickname,
+          avatarUrl: player.avatarUrl || DEFAULT_AVATAR,
+          isOwner: player.id === room?.ownerId,
+          isReady: room?.readyPlayers?.includes(player.id) || false
+        }));
+        
+        setPlayers(formattedPlayers);
+      }
+    });
+    
+    // 방 상태 구독
+    subscribe(`/topic/room/${roomId}/status`, (message) => {
       try {
-        // 방 정보 업데이트 구독
-        subscribe(`/topic/room/${roomId}`, (data) => {
-          debug("방 정보 업데이트 수신", data);
-          
-          // 타입이 있는 경우 (WebSocketRoomMessageResponse 형식)
-          if (data && data.type) {
-            debug(`메시지 타입: ${data.type}`);
-            
-            // JOIN, LEAVE, READY 이벤트 발생 시 서버에서 최신 플레이어 목록 조회
-            if (data.type === 'JOIN' || data.type === 'LEAVE' || data.type === 'READY') {
-              // 현재 상태 값을 캡처
-              const capturedCurrentUserId = currentUserIdRef.current;
-              const capturedCurrentUser = currentUserRef.current;
-              
-              // 1초 후 서버에서 최신 정보 조회 (이벤트 처리 시간 고려)
-              setTimeout(async () => {
-                try {
-                  debug(`${data.type} 이벤트 발생, 서버에서 최신 정보 조회`);
-                  
-                  // 방 정보 갱신
-                  const response = await (client.GET as any)(`/api/v1/rooms/${roomId}`, {}) as ApiResponse<RoomResponse>;
-                  
-                  if (response.error) {
-                    console.error("방 정보 갱신 실패:", response.error);
-                    return;
-                  }
-                  
-                  if (response.data?.data) {
-                    const roomData = response.data.data;
-                    debug("서버에서 최신 방 정보 로드 성공", roomData);
-                    
-                    // 방 정보 업데이트
-                    setRoom(roomData);
-                    
-                    // 방 참가자 정보 직접 로드 시도 (추가)
-                    await fetchRoomPlayers();
-                    
-                    // Fallback: players 배열이 비어있는지 확인
-                    const currentPlayers = players; // 현재 상태 캡처
-                    if (currentPlayers.length === 0) {
-                      debug("참가자 목록이 비어있어 방 정보에서 직접 추출 시도");
-                      
-                      // players 필드가 있으면 사용 (빈 배열이어도 그대로 사용)
-                      const playersData = roomData.players || [];
-                      debug("플레이어 목록:", playersData);
-                      
-                      // 상태 대신 캡처된 값 또는 ref 값 사용
-                      const userId = capturedCurrentUserId;
-                      // 플레이어 데이터가 비어있는지 확인
-                      let hasCurrentUser = false;
-                      
-                      debug("현재 사용자 확인:", {
-                        capturedUserId: userId,
-                        stateUserId: currentUserId, 
-                        refUserId: currentUserIdRef.current
-                      });
-                      
-                      // 빈 배열이어도 처리 (플레이어가 없는 상태)
-                      const formattedPlayers: PlayerProfile[] = playersData.map((player: any) => {
-                        // ID가 숫자면 문자열로 변환
-                        const id = typeof player.id === 'number' ? String(player.id) : player.id;
-                        
-                        // 현재 사용자가 목록에 있는지 확인
-                        if (userId && id === userId.toString()) {
-                          hasCurrentUser = true;
-                        }
-                        
-                        // 방장 여부 확인 - boolean 타입으로 명시적 변환
-                        const isPlayerOwner = Boolean(player.isOwner === true || 
-                          (roomData.ownerId && id === roomData.ownerId.toString()));
-                        
-                        return {
-                          id,
-                          nickname: player.nickname || player.name || '사용자',
-                          profileImage: player.profileImage || player.avatarUrl || DEFAULT_PROFILE_IMAGE,
-                          isOwner: isPlayerOwner,
-                          ready: Boolean(player.ready || player.isReady),
-                          status: player.status || "WAITING",
-                          score: player.score || 0
-                        };
-                      });
-                      
-                      // 현재 유저가 목록에 없고 방에 입장 중인 경우 자신을 추가
-                      if (!hasCurrentUser && userId && roomData) {
-                        debug("플레이어 목록에 현재 사용자가 없음, 자신을 추가");
-                        const isCurrentUserOwner = isUserRoomOwner(roomData, userId);
-                        const selfPlayer: PlayerProfile = {
-                          id: userId.toString(),
-                          nickname: capturedCurrentUser?.nickname || "사용자",
-                          profileImage: capturedCurrentUser?.profileImage || DEFAULT_PROFILE_IMAGE,
-                          isOwner: isCurrentUserOwner,
-                          ready: isReady,
-                          status: "WAITING",
-                          score: 0
-                        };
-                        formattedPlayers.push(selfPlayer);
-                        debug("플레이어 목록에 자신을 추가", selfPlayer);
-                      }
-                      
-                      // 목록이 여전히 비어있으면 로그 남기기
-                      if (formattedPlayers.length === 0) {
-                        console.warn("여전히 빈 플레이어 목록:", {
-                          currentUserId: userId,
-                          hasCurrentUser,
-                          roomOwnerId: roomData.ownerId
-                        });
-                      }
-                      
-                      setPlayers(formattedPlayers);
-                      debug("플레이어 목록 업데이트 완료", formattedPlayers);
-                      
-                      // 방장 여부 업데이트
-                      if (roomData.ownerId && userId) {
-                        const isCurrentUserOwner = isUserRoomOwner(roomData, userId);
-                        setIsOwner(isCurrentUserOwner);
-                      }
-                    }
-                  }
-                } catch (error) {
-                  console.error("최신 방 정보 조회 중 오류:", error);
-                }
-              }, 1000);
-            }
-            
-            // 기존 room 정보 업데이트 코드는 계속 유지
-            if (data.type === 'ROOM_UPDATED' || data.type === 'JOIN' || data.type === 'LEAVE') {
-              setRoom(prev => {
-                if (!prev) return data;
-                
-                // 플레이어 수 계산을 위한 처리
-                let updatedCurrentPlayers = prev.currentPlayers;
-                
-                if (data.type === 'JOIN') {
-                  // 플레이어 입장 시 +1
-                  updatedCurrentPlayers = (prev.currentPlayers || 0) + 1;
-                  debug("플레이어 입장", { before: prev.currentPlayers, after: updatedCurrentPlayers });
-                } else if (data.type === 'LEAVE') {
-                  // 플레이어 퇴장 시 -1 (0 미만이 되지 않도록)
-                  updatedCurrentPlayers = Math.max(0, (prev.currentPlayers || 1) - 1);
-                  debug("플레이어 퇴장", { before: prev.currentPlayers, after: updatedCurrentPlayers });
-                } else if (data.currentPlayers !== undefined) {
-                  // 직접 currentPlayers 값이 제공되면 사용
-                  updatedCurrentPlayers = data.currentPlayers;
-                  debug("플레이어 수 직접 업데이트", { before: prev.currentPlayers, after: updatedCurrentPlayers });
-                }
-                
-                // 방 정보와 플레이어 수 업데이트
-                const updated = { 
-                  ...prev, 
-                  ...data,
-                  currentPlayers: updatedCurrentPlayers 
-                };
-                
-                debug("방 정보 업데이트 완료", {
-                  id: updated.id,
-                  title: updated.title,
-                  currentPlayers: updated.currentPlayers,
-                  capacity: updated.capacity,
-                  owner: updated.ownerId || updated.owner
-                });
-                
-                return updated;
-              });
-            }
-            
-            // 게임 상태 업데이트
-            if (data.gameStatus || data.status) {
-              const newStatus = data.gameStatus || data.status;
-              debug("게임 상태 업데이트", newStatus);
-              setGameStatus(newStatus as RoomStatus);
-            }
-          }
-        });
-      
-        // 플레이어 상태 변경 구독
-        subscribe(`/topic/player/${roomId}`, (data) => {
-          debug("플레이어 상태 업데이트", data);
-          
-          if (data && data.id) {
-            // 단일 플레이어 상태 업데이트
-            setPlayers(prevPlayers => {
-              const updatedPlayers = [...prevPlayers];
-              const playerIndex = updatedPlayers.findIndex(p => p.id === data.id);
-              
-              if (playerIndex !== -1) {
-                // 기존 플레이어 정보 유지하면서 새 정보 병합
-                updatedPlayers[playerIndex] = {
-                  ...updatedPlayers[playerIndex],
-                  nickname: data.nickname || updatedPlayers[playerIndex].nickname,
-                  profileImage: data.profileImage || data.avatarUrl || updatedPlayers[playerIndex].profileImage,
-                  ready: data.ready !== undefined ? data.ready : data.isReady !== undefined ? data.isReady : updatedPlayers[playerIndex].ready,
-                  isOwner: data.isOwner !== undefined ? data.isOwner : updatedPlayers[playerIndex].isOwner,
-                  status: data.status || updatedPlayers[playerIndex].status,
-                  score: data.score !== undefined ? data.score : updatedPlayers[playerIndex].score
-                };
-                
-                // 현재 사용자의 상태가 변경된 경우 isReady 상태도 업데이트
-                if (currentUserId && data.id === currentUserId.toString()) {
-                  setIsReady(updatedPlayers[playerIndex].ready);
-                }
-              } else if (data.id) {
-                // 새 플레이어 추가
-                const newPlayer: PlayerProfile = {
-                  id: data.id,
-                  nickname: data.nickname || data.name || '사용자',
-                  profileImage: data.profileImage || data.avatarUrl || DEFAULT_PROFILE_IMAGE,
-                  isOwner: Boolean(data.isOwner),
-                  ready: Boolean(data.ready || data.isReady),
-                  status: data.status || "WAITING",
-                  score: data.score || 0
-                };
-                
-                updatedPlayers.push(newPlayer);
-              }
-              
-              return updatedPlayers;
-            });
-          }
-        });
-      
-        // 채팅 메시지 구독 - 1번 주소
-        subscribe(`/topic/room/chat/${roomId}`, (data) => {
-          debug("채팅 메시지 수신 (주소1)", data);
-          handleChatMessage(data, "주소1");
-        });
-      
-        // 채팅 메시지 구독 - 2번 주소 (대체 경로)
-        subscribe(`/topic/chat/room/${roomId}`, (data) => {
-          debug("채팅 메시지 수신 (주소2)", data);
-          handleChatMessage(data, "주소2");
-        });
-      
-        // 채팅 메시지 구독 - 3번 주소 (게임 채팅 경로)
-        subscribe(`/topic/game/chat/${roomId}`, (data) => {
-          debug("채팅 메시지 수신 (주소3)", data);
-          handleChatMessage(data, "주소3");
-        });
+        console.log("방 상태 업데이트:", message);
         
-        debug("구독 설정 완료");
-        return true;
-      } catch (error) {
-        console.error("구독 설정 중 오류 발생:", error);
-        debug("구독 설정 실패");
-        return false;
-      }
-    };
-    
-    // 구독 시도 시작
-    trySubscribe();
-    return true;
-  };
-
-  // 채팅 메시지 처리 공통 함수
-  const handleChatMessage = (data: any, source: string) => {
-    console.warn(`채팅 메시지 수신 [${source}]:`, data);
-    
-    try {
-      // 테스트: 모든 수신 메시지를 강제로 채팅에 표시
-      const rawMessage = {
-        senderId: "system",
-        senderName: `시스템 (${source})`,
-        content: typeof data === 'string' ? data : JSON.stringify(data),
-        timestamp: Date.now()
-      };
-      setChatMessages(prev => [...prev, rawMessage]);
-      
-      // 서버에서 받은 데이터 형식이 다양할 수 있으므로 처리
-      let chatData = data;
-      
-      // 문자열이면 JSON으로 파싱
-      if (typeof data === 'string') {
-        try {
-          chatData = JSON.parse(data);
-          debug("채팅 메시지 파싱 결과", chatData);
-        } catch (e) {
-          console.error("채팅 메시지 파싱 실패:", e);
-          return;
+        // 메시지가 없거나 유효하지 않은 경우 처리
+        if (!message) return;
+        
+        let status;
+        
+        // 메시지 형식에 따른 처리
+        if (typeof message === 'object') {
+          // 이미 파싱된 객체인 경우
+          status = message;
+        } else {
+          // 문자열인 경우 파싱 시도
+          try {
+            status = JSON.parse(message);
+          } catch (error) {
+            console.error("JSON 파싱 오류:", error);
+            return;
+          }
         }
-      }
-      
-      // 필요한 필드가 있는지 확인
-      debug("채팅 메시지 데이터 검사", {
-        hasData: !!chatData,
-        source,
-        type: chatData?.type,
-        content: chatData?.content,
-        senderId: chatData?.senderId,
-        senderName: chatData?.senderName
-      });
-      
-      if (chatData && chatData.content) {
-        const chatMessage = {
-          senderId: chatData.senderId || chatData.userId || "unknown",
-          senderName: chatData.senderName || chatData.username || "사용자",
-          content: chatData.content || chatData.message || "내용 없음",
-          timestamp: chatData.timestamp || Date.now()
-        };
         
-        debug("채팅 메시지 추가", chatMessage);
-        setChatMessages(prev => [...prev, chatMessage]);
-        
-        // 채팅 자동 스크롤
-        setTimeout(() => {
-          if (chatContainerRef.current) {
-            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        // 방 정보 업데이트
+        if (status.room) {
+          setRoom(prevRoom => {
+            if (!prevRoom) return status.room;
+            return { ...prevRoom, ...status.room };
+          });
+          
+          // 방장 변경 시 isOwner 상태 업데이트
+          if (status.room.ownerId && currentUser) {
+            const isCurrentUserOwner = status.room.ownerId === currentUser.id;
+            setIsOwner(isCurrentUserOwner);
           }
-        }, 100);
-      } else {
-        debug("처리할 수 없는 채팅 메시지 형식", chatData);
+        }
+        
+        // 플레이어 목록 업데이트
+        if (status.players && Array.isArray(status.players)) {
+          setPlayers(status.players);
+          
+          // 자신의 준비 상태 확인
+          if (currentUser) {
+            const playerInfo = status.players.find((p: any) => p.id === currentUser.id.toString());
+            if (playerInfo) {
+              setIsReady(playerInfo.isReady);
+            }
+          }
+        }
+        
+        // 게임 상태 변경 처리 (예: 게임 시작 시 게임 페이지로 이동)
+        if (status.room?.status === 'IN_GAME') {
+          // 게임 시작 시 게임 페이지로 이동하는 로직 추가
+          setToast({
+            type: "info",
+            message: "게임이 시작되었습니다!",
+            duration: 2000
+          });
+          
+          // 게임 시작 상태 유지 (게임 로직을 여기에 추가하거나 다른 페이지로 이동)
+        }
+      } catch (error) {
+        console.error("방 상태 처리 오류:", error);
       }
-    } catch (error) {
-      console.error("채팅 메시지 처리 중 오류:", error);
-    }
-  };
-
-  // 방 나가기
-  const leaveRoom = async () => {
-    try {
-      debug("방 나가기 요청", roomId);
-      await (client.POST as any)(`/api/v1/rooms/${roomId}/leave`, {});
-      window.location.href = '/lobby';
-    } catch (error) {
-      console.error("방을 나가는데 실패했습니다:", error);
-      // 오류가 발생해도 로비로 이동
-      window.location.href = '/lobby';
-    }
-  };
-
-  // 준비 상태 토글
-  const toggleReady = async () => {
-    // 백엔드는 토글 API를 사용함
-    try {
-      debug("준비 상태 토글 요청", {roomId, currentState: isReady});
-      const response = await (client.POST as any)(`/api/v1/rooms/${roomId}/ready`, {});
+    });
+    
+    // 채팅 메시지 구독
+    subscribe(`/topic/room/${roomId}/chat`, (message) => {
+      // 중복 메시지 검사
+      const isDuplicate = chatMessages.some(existingMsg => 
+        existingMsg.timestamp === message.timestamp && 
+        existingMsg.content === message.content &&
+        existingMsg.senderId === message.senderId
+      );
       
-      if (response.error) {
-        console.error("준비 상태 변경에 실패했습니다:", response.error);
+      // 중복 메시지면 무시
+      if (isDuplicate) {
+        console.log("중복 메시지 무시:", message);
         return;
       }
       
-      // 성공 시 로컬 상태 업데이트
-      const newReadyState = !isReady;
-      debug("준비 상태 변경 성공", {before: isReady, after: newReadyState});
-      setIsReady(newReadyState);
+      // 메시지에 고유 ID 추가
+      const messageWithId: ChatMessage = {
+        ...message,
+        id: `${message.senderId}-${message.timestamp}-${Math.random().toString(36).substr(2, 5)}`,
+        avatarUrl: message.avatarUrl || DEFAULT_AVATAR
+      };
       
-      // 플레이어 목록에서 현재 사용자 상태 업데이트
-      setPlayers(prevPlayers => 
-        prevPlayers.map(player => 
-          player.id === currentUserId?.toString()
-            ? { ...player, ready: newReadyState }
-            : player
-        )
-      );
+      // 메시지 추가
+      setChatMessages(prev => [...prev, messageWithId]);
+    });
+    
+    setIsConnected(true);
+  };
+  
+  // 방 입장 처리
+  const joinRoom = async () => {
+    if (!currentUser) return;
+    
+    try {
+      // 방 입장 API 호출
+      await client.POST(`/api/v1/rooms/{roomId}/join`, {
+        params: { path: { roomId: parseInt(roomId) } }
+      });
+      
+      // 입장 메시지 발행
+      publish(`/app/room/${roomId}/join`, {
+        roomId: parseInt(roomId)
+      });
+      
+      // 입장 시스템 메시지
+      publish(`/app/room/${roomId}/chat`, {
+        type: "SYSTEM",
+        content: `${currentUser.nickname}님이 입장했습니다.`,
+        senderId: "system",
+        senderName: "System",
+        timestamp: Date.now()
+      });
+      
+      // 로비에 사용자 상태 업데이트 전송
+      publish(`/app/lobby/status`, {
+        type: "STATUS_UPDATE",
+        status: `게임방 ${roomId}번 입장`,
+        location: "IN_ROOM",
+        roomId: parseInt(roomId),
+        timestamp: Date.now()
+      });
+      
+      // 성공 메시지
+      setToast({
+        type: "success",
+        message: "방에 입장했습니다!",
+        duration: 2000
+      });
     } catch (error) {
-      console.error("준비 상태 변경에 실패했습니다:", error);
+      console.error("방 입장에 실패했습니다:", error);
+      setToast({
+        type: "error",
+        message: "방 입장에 실패했습니다.",
+        duration: 3000
+      });
     }
   };
-
+  
+  // 방 퇴장 처리
+  const leaveRoom = async () => {
+    try {
+      // 방 퇴장 API 호출
+      await client.POST(`/api/v1/rooms/{roomId}/leave`, {
+        params: { path: { roomId: parseInt(roomId) } }
+      });
+      
+      // 퇴장 메시지 발행
+      if (currentUser) {
+        publish(`/app/room/${roomId}/chat`, {
+          type: "SYSTEM",
+          content: `${currentUser.nickname}님이 퇴장했습니다.`,
+          senderId: "system",
+          senderName: "System",
+          timestamp: Date.now()
+        });
+      }
+      
+      // 로비에 사용자 상태 업데이트 전송
+      publish(`/app/lobby/status`, {
+        type: "STATUS_UPDATE",
+        status: "로비",
+        location: "IN_LOBBY",
+        roomId: null,
+        timestamp: Date.now()
+      });
+      
+      // 웹소켓 구독 해제
+      unsubscribe(`/topic/room/${roomId}`);
+      unsubscribe(`/topic/room/${roomId}/players`);
+      unsubscribe(`/topic/room/${roomId}/status`);
+      unsubscribe(`/topic/room/${roomId}/chat`);
+      
+      // 로비로 이동
+      localStorage.setItem('intentional_navigation', 'true');
+      router.push('/lobby');
+    } catch (error) {
+      console.error("방 퇴장에 실패했습니다:", error);
+      setToast({
+        type: "error",
+        message: "방 퇴장에 실패했습니다.",
+        duration: 3000
+      });
+    }
+  };
+  
+  // 준비 상태 토글
+  const toggleReady = async () => {
+    try {
+      // 게임이 이미 시작된 경우 처리하지 않음
+      if (room?.status !== 'WAITING' || isOwner) return;
+      
+      // 준비 상태 토글
+      const newReadyState = !isReady;
+      
+      // 준비 상태 변경 API 호출
+      await client.POST(`/api/v1/rooms/{roomId}/ready`, {
+        params: { path: { roomId: parseInt(roomId) } }
+      });
+      
+      // 메시지 발행
+      if (currentUser) {
+        publish(`/app/room/${roomId}/chat`, {
+          type: "SYSTEM",
+          content: `${currentUser.nickname}님이 ${newReadyState ? '준비 완료' : '준비 취소'}하였습니다.`,
+          senderId: "system",
+          senderName: "System",
+          timestamp: Date.now()
+        });
+      }
+      
+      // 로컬 상태 업데이트
+      setIsReady(newReadyState);
+      
+      // 플레이어 목록 업데이트
+      setPlayers(prev => {
+        const updated = prev.map(player => {
+          if (currentUser && player.id === currentUser.id.toString()) {
+            return { ...player, isReady: newReadyState };
+          }
+          return player;
+        });
+        
+        // 상태 업데이트 브로드캐스트
+        publish(`/app/room/${roomId}/status`, {
+          players: updated,
+          timestamp: Date.now()
+        });
+        
+        return updated;
+      });
+    } catch (error) {
+      console.error("준비 상태 변경에 실패했습니다:", error);
+      setToast({
+        type: "error",
+        message: "준비 상태 변경에 실패했습니다.",
+        duration: 3000
+      });
+    }
+  };
+  
   // 게임 시작
   const startGame = async () => {
-    if (!isOwner) {
-      console.warn("방장만 게임을 시작할 수 있습니다.");
+    // 방장이 아니거나 게임이 이미 시작된 경우 처리하지 않음
+    if (!isOwner || room?.status !== 'WAITING') {
+      setToast({
+        type: "error",
+        message: "게임을 시작할 수 없습니다.",
+        duration: 3000
+      });
       return;
     }
     
-    debug("게임 시작 요청", {roomId, isOwner});
+    // 모든 플레이어가 준비 완료인지 확인
+    const allPlayersReady = players.every(player => player.isOwner || player.isReady);
+    
+    if (!allPlayersReady) {
+      setToast({
+        type: "warning",
+        message: "모든 플레이어가 준비를 완료해야 합니다.",
+        duration: 3000
+      });
+      return;
+    }
     
     try {
-      const response = await (client.POST as any)(`/api/v1/rooms/${roomId}/start`, {});
+      // 게임 시작 API 호출
+      await client.POST(`/api/v1/rooms/{roomId}/start`, {
+        params: { path: { roomId: parseInt(roomId) } }
+      });
       
-      if (response.error) {
-        console.error("게임 시작에 실패했습니다:", response.error);
-        return;
-      }
+      // 게임 시작 메시지 발행
+      publish(`/app/room/${roomId}/chat`, {
+        type: "SYSTEM",
+        content: "게임이 시작되었습니다!",
+        senderId: "system",
+        senderName: "System",
+        timestamp: Date.now()
+      });
       
-      debug("게임 시작 요청 성공");
-      // 게임 시작 요청 후 WebSocket으로 상태 변경을 감지하므로 추가 조치 필요 없음
+      // 게임 상태 업데이트
+      publish(`/app/room/${roomId}/status`, {
+        room: { ...room, status: 'IN_GAME' },
+        timestamp: Date.now()
+      });
     } catch (error) {
       console.error("게임 시작에 실패했습니다:", error);
+      setToast({
+        type: "error",
+        message: "게임 시작에 실패했습니다.",
+        duration: 3000
+      });
     }
   };
-
+  
   // 채팅 메시지 전송
-  const handleSendChatMessage = () => {
-    if (!newChatMessage.trim() || isComposing) return;
+  const sendChatMessage = (message: string) => {
+    if (!message.trim() || !currentUser) return;
     
-    const message = newChatMessage.trim();
-    setNewChatMessage("");
-    
-    try {
-      debug("채팅 메시지 전송", {roomId, message});
-      
-      // 서버에서는 /app/room/chat/{roomId} 형식으로 처리
-      publish(`/app/room/chat/${roomId}`, message);
-      debug(`메시지 전송 완료: ${message}`);
-      
-      // 채팅 화면에 바로 표시 (낙관적 업데이트)
-      const localMessage = {
-        senderId: currentUserId,
-        senderName: currentUser?.nickname || "나",
-        content: message,
-        timestamp: Date.now()
-      };
-      
-      setChatMessages(prev => [...prev, localMessage]);
-    } catch (error) {
-      console.error("채팅 메시지 전송 실패:", error);
-    }
+    // 서버로 채팅 메시지 발행
+    publish(`/app/room/${roomId}/chat`, {
+      type: "CHAT",
+      content: message,
+      senderId: currentUser.id.toString(),
+      senderName: currentUser.nickname,
+      timestamp: Date.now()
+    });
   };
-
-  // 채팅 입력 키 이벤트 처리
-  const handleChatKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
-      e.preventDefault();
-      handleSendChatMessage();
-    }
-  };
-
-  // IME 조합 시작 (한글, 일본어, 중국어 등)
-  const handleCompositionStart = () => {
-    setIsComposing(true);
-  };
-
-  // IME 조합 종료
-  const handleCompositionEnd = () => {
-    setIsComposing(false);
-  };
-
-  // 초기 로딩
+  
+  // 페이지 초기화
   useEffect(() => {
-    const loadData = async () => {
+    // 데이터 로딩
+    const initData = async () => {
+      setLoading(true);
+      
       try {
-        debug("초기 데이터 로딩 시작");
+        // 방 정보 가져오기
+        const roomData = await fetchRoomData();
         
-        // 웹소켓 연결 상태 확인 및 필요시 재연결
-        if (!isConnected()) {
-          debug("웹소켓 연결 확인 - 연결 안됨, 재연결 시도");
-          const reconnected = reconnectWebSocket();
-          if (!reconnected) {
-            debug("웹소켓 재연결 실패");
-            // 페이지 로드 초기에 재연결 실패 시 바로 에러 표시하지 않고
-            // 사용자 정보와 방 정보 로드 후 구독 설정에서 다시 시도
-            console.warn("웹소켓 재연결 실패, 사용자/방 정보 로드 후 다시 시도");
-          } else {
-            debug("웹소켓 재연결 성공");
-            // 재연결 후 연결이 완전히 설정될 때까지 잠시 대기
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-        } else {
-          debug("웹소켓 연결 확인 - 이미 연결됨");
-        }
+        // 사용자 정보 가져오기
+        const userData = await fetchCurrentUser();
         
-        // 사용자 정보 로드
-        const user = await fetchCurrentUser();
-        if (!user) {
-          setError("사용자 정보를 가져올 수 없습니다. 로그인이 필요합니다.");
-          return;
-        }
+        // 웹소켓 구독 설정
+        setupWebSocket();
         
-        // 방 정보 로드
-        await fetchRoomData();
-        
-        // 방 참가자 정보 직접 로드 (추가)
-        const loadedPlayers = await fetchRoomPlayers();
-        
-        // 참가자 정보 로드 실패 시 이 시점에서 플레이어 목록이 비어있으면 자동으로 자신을 추가
-        if ((loadedPlayers?.length === 0 || !loadedPlayers) && currentUserIdRef.current && room) {
-          debug("참가자 목록이 비어있어 자동으로 자신을 추가합니다");
+        // 방 입장 처리
+        if (userData && roomData) {
+          await joinRoom();
           
-          const isCurrentUserOwner = isUserRoomOwner(room, currentUserIdRef.current);
-          const selfPlayer: PlayerProfile = {
-            id: currentUserIdRef.current.toString(),
-            nickname: currentUserRef.current?.nickname || "사용자",
-            profileImage: currentUserRef.current?.profileImage || DEFAULT_PROFILE_IMAGE,
-            isOwner: isCurrentUserOwner,
-            ready: isReady,
-            status: "WAITING",
-            score: 0
-          };
+          // 방장 여부 확인
+          setIsOwner(roomData.ownerId === userData.id);
           
-          setPlayers([selfPlayer]);
-          debug("초기 로딩 - 자신을 플레이어 목록에 추가", selfPlayer);
-          
-          // 방 인원 수 설정 (초기화)
-          setRoom(prev => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              currentPlayers: Math.max(1, prev.currentPlayers || 0) // 최소 1명 (자기 자신)
-            };
-          });
-        }
-        
-        // 구독 설정 - 최대 3번 시도
-        let wsSetupSuccess = false;
-        for (let i = 0; i < 3; i++) {
-          debug(`웹소켓 구독 설정 시도 ${i + 1}/3`);
-          wsSetupSuccess = setupWebSocket();
-          if (wsSetupSuccess) {
-            debug("구독 설정 성공");
-            break;
-          }
-          
-          // 설정 실패 시 1초 대기 후 재시도
-          debug("구독 설정 실패, 재시도...");
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-        
-        if (!wsSetupSuccess) {
-          debug("여러 번의 시도 후에도 구독 설정 실패");
-          setError("실시간 업데이트 연결에 실패했습니다. 페이지를 새로고침하거나 다시 시도해주세요.");
-        } else {
-          debug("초기 데이터 로딩 및 웹소켓 설정 완료");
-          
-          // 구독 설정 성공 후에도 한번 더 플레이어 목록 확인
-          if (loadedPlayers?.length === 0 && currentUserIdRef.current && room) {
-            debug("구독 설정 후에도 플레이어 목록이 비어있어 자신을 추가합니다");
-            
-            const isCurrentUserOwner = isUserRoomOwner(room, currentUserIdRef.current);
-            const selfPlayer: PlayerProfile = {
-              id: currentUserIdRef.current.toString(),
-              nickname: currentUserRef.current?.nickname || "사용자",
-              profileImage: currentUserRef.current?.profileImage || DEFAULT_PROFILE_IMAGE,
-              isOwner: isCurrentUserOwner,
-              ready: isReady,
-              status: "WAITING",
-              score: 0
-            };
-            
-            setPlayers([selfPlayer]);
-            debug("구독 설정 후 - 자신을 플레이어 목록에 추가", selfPlayer);
-            
-            // 누락된 경우 강제로 로그 출력
-            console.warn("플레이어 목록 상태 확인:", {
-              playersLength: loadedPlayers?.length,
-              currentUserId: currentUserIdRef.current,
-              roomData: room
-            });
-          }
+          // 시스템 메시지 추가 - 환영 메시지
+          setChatMessages([{
+            type: "SYSTEM",
+            content: "채팅방에 입장했습니다. 환영합니다!",
+            senderId: "system",
+            senderName: "System",
+            timestamp: Date.now()
+          }]);
         }
       } catch (error) {
-        console.error("데이터 로딩 중 오류:", error);
-        setError("데이터를 로딩하는 중 오류가 발생했습니다.");
+        console.error("초기화 중 오류 발생:", error);
+        setError("방 정보를 불러오는데 실패했습니다.");
+      } finally {
+        setLoading(false);
       }
     };
-
-    loadData();
-
-    // 컴포넌트 언마운트 시 WebSocket 연결 해제
+    
+    initData();
+    
+    // 컴포넌트 언마운트 시 정리
     return () => {
-      debug("웹소켓 구독 해제", roomId);
+      // 웹소켓 구독 해제
       unsubscribe(`/topic/room/${roomId}`);
-      unsubscribe(`/topic/player/${roomId}`);
-      unsubscribe(`/topic/room/chat/${roomId}`);
-      unsubscribe(`/topic/chat/room/${roomId}`);
-      unsubscribe(`/topic/game/chat/${roomId}`);
+      unsubscribe(`/topic/room/${roomId}/players`);
+      unsubscribe(`/topic/room/${roomId}/status`);
+      unsubscribe(`/topic/room/${roomId}/chat`);
     };
   }, [roomId]);
-
-  // 채팅 스크롤 자동화
+  
+  // 앱 종료 전 경고 메시지
   useEffect(() => {
-    if (chatContainerRef.current && chatMessages.length > 0) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [chatMessages.length]);
-
-  // 방장 상태 변경 시 로그
-  useEffect(() => {
-    debug("방장 상태 변경", {isOwner, currentUserId});
-  }, [isOwner, currentUserId]);
-
-  // 플레이어 목록 처리 로직 강화
-  useEffect(() => {
-    // 플레이어 목록이 비어있고, 사용자 정보와 방 정보가 모두 있을 때 자동으로 자신을 추가
-    if (players.length === 0 && currentUserIdRef.current && room) {
-      debug("플레이어 목록이 비어 있어 자동으로 자신을 추가합니다");
-      
-      const isCurrentUserOwner = isUserRoomOwner(room, currentUserIdRef.current);
-      const selfPlayer: PlayerProfile = {
-        id: currentUserIdRef.current.toString(),
-        nickname: currentUserRef.current?.nickname || "사용자",
-        profileImage: currentUserRef.current?.profileImage || DEFAULT_PROFILE_IMAGE,
-        isOwner: isCurrentUserOwner,
-        ready: isReady,
-        status: "WAITING",
-        score: 0
-      };
-      
-      setPlayers([selfPlayer]);
-      debug("자신을 플레이어 목록에 추가 완료", selfPlayer);
-    }
-  }, [players.length, room, isReady]);
-
-  // 에러 발생 시 표시
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const message = "정말로 페이지를 나가시겠습니까? 진행 중인 내용이 손실될 수 있습니다.";
+      e.returnValue = message;
+      return message;
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
+  
+  // 로딩 중 표시
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white">
+        <div className="animate-spin mb-4">
+          <svg className="w-12 h-12 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+        </div>
+        <p className="text-xl font-medium">방 정보를 불러오는 중입니다...</p>
+      </div>
+    );
+  }
+  
+  // 오류 발생 시
   if (error) {
     return (
-      <AppLayout showHomeButton={false}>
-        <div className="flex flex-col items-center justify-center h-[70vh] text-center p-4">
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-4">
-            <p className="font-bold mb-2">오류 발생</p>
-            <p>{error}</p>
-          </div>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white">
+        <div className="bg-red-600/20 border border-red-600/30 rounded-lg p-6 max-w-md">
+          <h1 className="text-xl font-bold mb-4">오류가 발생했습니다</h1>
+          <p className="text-gray-300 mb-6">{error}</p>
           <button 
-            onClick={() => window.location.href = '/lobby'} 
-            className="mt-4 px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+            onClick={() => router.push('/lobby')}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-4 rounded transition-colors"
           >
             로비로 돌아가기
           </button>
         </div>
-      </AppLayout>
+      </div>
     );
   }
 
   return (
-    <AppLayout showHomeButton={false} showBeforeUnloadWarning={true}>
-      <div className="flex flex-col h-full max-w-7xl mx-auto">
-        {/* 방 헤더 */}
-        <RoomHeader room={room} />
-        
-        {/* 메인 콘텐츠 영역 */}
-        <div className="flex-1 p-4 md:p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* 플레이어 목록 또는 채팅 (모바일에서는 탭으로 전환) */}
-          <div className="md:hidden flex mb-4">
-            <div className="w-full grid grid-cols-2 bg-gray-800/30 backdrop-blur-sm border border-gray-700/50 rounded-xl overflow-hidden">
-              <button 
-                onClick={() => setActiveTab('players')}
-                className={`py-3 flex items-center justify-center transition-colors ${
-                  activeTab === 'players' 
-                    ? 'bg-indigo-800/50 text-white border-b-2 border-indigo-500' 
-                    : 'text-gray-400 hover:text-gray-300'
-                }`}
-              >
-                <FaUsers className="mr-2" />
-                플레이어 ({players.length})
-              </button>
-              <button 
-                onClick={() => setActiveTab('chat')}
-                className={`py-3 flex items-center justify-center transition-colors ${
-                  activeTab === 'chat' 
-                    ? 'bg-indigo-800/50 text-white border-b-2 border-indigo-500' 
-                    : 'text-gray-400 hover:text-gray-300'
-                }`}
-              >
-                <FaComments className="mr-2" />
-                채팅
-              </button>
-            </div>
-          </div>
+    <div className="max-w-[1400px] mx-auto px-4 py-4 h-[calc(100vh-2rem)] flex flex-col">
+      {/* 토스트 메시지 표시 */}
+      {toast && (
+        <Toast
+          type={toast.type}
+          message={toast.message}
+          duration={toast.duration}
+          onClose={() => setToast(null)}
+        />
+      )}
+      
+      {/* 방 헤더 */}
+      <RoomHeader 
+        room={room}
+        roomId={roomId}
+        onLeave={leaveRoom}
+      />
+      
+      {/* 메인 컨텐츠 - 플레이어 목록과 채팅창 */}
+      <div className="flex flex-col md:flex-row gap-5 flex-grow overflow-hidden">
+        {/* 왼쪽 영역 - 플레이어 목록 */}
+        <div className="w-full md:w-1/3 flex flex-col gap-5">
+          {/* 플레이어 목록 컴포넌트 */}
+          <PlayerList 
+            players={players}
+            currentUserId={currentUser?.id || null}
+          />
           
-          {/* 모바일에서는 선택된 탭만 표시 */}
-          <div className={`${activeTab !== 'players' ? 'hidden md:block' : 'block'}`}>
-            <PlayerList players={players} currentUserId={currentUserId} />
-          </div>
-          
-          {/* 게임 중앙 영역 - 게임 상태에 따라 다른 내용 표시 */}
-          <div className="md:col-span-1 bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-6 flex flex-col">
-            {gameStatus === "WAITING" ? (
-              <div className="flex-1 flex flex-col items-center justify-center">
-                <div className="text-center mb-8">
-                  <h2 className="text-2xl font-bold mb-2">게임 대기 중</h2>
-                  <p className="text-gray-400">
-                    {isOwner 
-                      ? "모든 플레이어가 준비되면 게임을 시작할 수 있습니다." 
-                      : "방장이 게임을 시작하기를 기다리고 있습니다."}
-                  </p>
-                </div>
-                
-                {isOwner ? (
-                  // 방장 전용 버튼
-                  <button
-                    onClick={startGame}
-                    disabled={players.filter(p => !p.isOwner).some(p => !p.ready) || players.length < 2}
-                    className={`flex items-center justify-center w-full max-w-xs px-6 py-3 rounded-xl text-lg font-medium transition-colors 
-                      ${players.filter(p => !p.isOwner).some(p => !p.ready) || players.length < 2
-                        ? 'bg-gray-700 text-gray-400 cursor-not-allowed' 
-                        : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white'
-                      }`}
-                  >
-                    <FaPlay className="mr-2" />
-                    게임 시작
-                  </button>
-                ) : (
-                  // 일반 플레이어 버튼
-                  <button
-                    onClick={toggleReady}
-                    className={`flex items-center justify-center w-full max-w-xs px-6 py-3 rounded-xl text-lg font-medium transition-colors 
-                      ${isReady 
-                        ? 'bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white' 
-                        : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white'
-                      }`}
-                  >
-                    {isReady 
-                      ? <>준비 취소</>
-                      : <><FaCheck className="mr-2" /> 준비 완료</>
-                    }
-                  </button>
-                )}
-                
-                <div className="mt-8 text-gray-400 text-sm">
-                  <p className="flex items-center justify-center">
-                    <FaInfoCircle className="mr-2" />
-                    {isOwner 
-                      ? `최소 2명 이상의 플레이어가 필요하며, 모든 플레이어가 준비 완료해야 합니다.`
-                      : `방장이 게임을 시작하기 전에 준비 버튼을 눌러주세요.`
-                    }
-                  </p>
-                </div>
-              </div>
+          {/* 게임 조작 영역 */}
+          <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-5">
+            <h2 className="text-xl font-semibold text-white mb-4">게임 조작</h2>
+            
+            {isOwner ? (
+              <button
+                className={`w-full py-3 rounded-xl font-medium text-white ${
+                  room?.status !== 'WAITING' || players.some(p => !p.isOwner && !p.isReady)
+                    ? 'bg-gray-700 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800'
+                }`}
+                onClick={startGame}
+                disabled={room?.status !== 'WAITING' || players.some(p => !p.isOwner && !p.isReady)}
+              >
+                게임 시작
+              </button>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center">
-                <p className="text-2xl font-bold mb-4">게임 진행 중</p>
-                <div className="animate-spin rounded-full h-20 w-20 border-t-2 border-b-2 border-indigo-500"></div>
+              <button
+                className={`w-full py-3 rounded-xl font-medium text-white ${
+                  room?.status !== 'WAITING'
+                    ? 'bg-gray-700 cursor-not-allowed'
+                    : isReady
+                      ? 'bg-red-600 hover:bg-red-700'
+                      : 'bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800'
+                }`}
+                onClick={toggleReady}
+                disabled={room?.status !== 'WAITING'}
+              >
+                {isReady ? '준비 취소' : '준비 완료'}
+              </button>
+            )}
+            
+            {room?.status === 'WAITING' && (
+              <div className="mt-3 text-center text-sm text-gray-400">
+                {isOwner 
+                  ? '모든 플레이어가 준비를 완료하면 게임을 시작할 수 있습니다.'
+                  : '게임에 참여하려면 준비 버튼을 클릭하세요.'}
               </div>
             )}
           </div>
-          
-          {/* 채팅 영역 - 데스크톱에서는 항상 표시, 모바일에서는 채팅 탭 선택 시만 표시 */}
-          <div className={`md:block ${activeTab !== 'chat' && 'hidden'} bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-6 flex flex-col`}>
-            <h2 className="text-xl font-semibold mb-4 flex items-center">
-              <FaComments className="mr-2.5 text-indigo-400" />
-              채팅
-            </h2>
-            
-            {/* 채팅 메시지 목록 */}
-            <div 
-              ref={chatContainerRef}
-              className="flex-1 overflow-y-auto mb-4 pr-2 space-y-2.5 min-h-[200px] max-h-[500px]"
-            >
-              {chatMessages.length === 0 && (
-                <div className="p-4 bg-gray-800/50 rounded-lg text-gray-400 text-sm text-center">
-                  채팅 메시지가 없습니다.
-                </div>
-              )}
-              
-              {chatMessages.map((message, index) => (
-                <div key={index} className="flex items-start">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-700 mr-2 overflow-hidden">
-                    <div className="w-full h-full flex items-center justify-center text-white font-medium bg-gradient-to-br from-blue-500 to-indigo-600">
-                      {message.senderName ? message.senderName.charAt(0).toUpperCase() : '?'}
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center">
-                      <span className="font-medium">{message.senderName || '익명'}</span>
-                      <span className="ml-2 text-xs text-gray-500">
-                        {new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                      </span>
-                    </div>
-                    <p className="text-sm mt-1">{message.content}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            
-            {/* 채팅 입력 */}
-            <div className="flex">
-              <input
-                type="text"
-                value={newChatMessage}
-                onChange={e => setNewChatMessage(e.target.value)}
-                onKeyDown={handleChatKeyDown}
-                onCompositionStart={handleCompositionStart}
-                onCompositionEnd={handleCompositionEnd}
-                placeholder="메시지 입력..."
-                className="flex-1 bg-gray-900/80 text-white border border-gray-700 rounded-l-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-              />
-              <button
-                onClick={handleSendChatMessage}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 rounded-r-lg transition-colors"
-              >
-                전송
-              </button>
-            </div>
-          </div>
         </div>
         
-        {/* 하단 버튼 */}
-        <div className="p-4 border-t border-gray-800 bg-gray-900/50">
-          <div className="max-w-7xl mx-auto">
-            <button
-              onClick={leaveRoom}
-              className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
-            >
-              <FaDoorOpen className="mr-2" />
-              나가기
-            </button>
-          </div>
+        {/* 오른쪽 영역 - 채팅창 */}
+        <div className="w-full md:w-2/3 flex-grow">
+          <RoomChat 
+            messages={chatMessages}
+            currentUserId={currentUser?.id || null}
+            onSendMessage={sendChatMessage}
+          />
         </div>
       </div>
+    </div>
+  );
+}
+
+export default function RoomPage() {
+  return (
+    <AppLayout showBeforeUnloadWarning={true} showHeader={false}>
+      <RoomContent />
     </AppLayout>
   );
 }

@@ -22,31 +22,31 @@ export type SubCategory =
 
 // 방 정보 인터페이스
 export interface RoomResponse {
-  id: string;
-  title: string;
-  difficulty?: "EASY" | "NORMAL" | "HARD";
-  mainCategory?: string;
-  subCategory?: string;
+  id?: number;
+  title?: string;
+  status?: RoomStatus;
+  ownerId?: number;
+  ownerNickname?: string;
   currentPlayers?: number;
   capacity?: number;
-  owner?: string;
-  ownerId?: string | number;
+  difficulty?: Difficulty;
+  mainCategory?: MainCategory;
+  subCategory?: SubCategory;
+  problemCount?: number;
   isPrivate?: boolean;
   password?: string;
-  status?: "WAITING" | "PLAYING" | "FINISHED";
+  players?: number[];
+  readyPlayers?: number[];
   createdAt?: string;
-  updatedAt?: string;
-  players?: PlayerProfile[];
 }
 
 // 플레이어 프로필 인터페이스
 export interface PlayerProfile {
   id: string;
   nickname: string;
-  profileImage?: string;
-  ready: boolean;
+  avatarUrl?: string;
   isOwner: boolean;
-  status?: "WAITING" | "READY" | "PLAYING";
+  isReady: boolean;
   score?: number;
 }
 
@@ -58,30 +58,4 @@ export type RoomMessageType =
   | "UNREADY"
   | "START_GAME"
   | "ROOM_UPDATED"
-  | "CHAT";
-
-// 방 메시지 인터페이스
-export interface RoomMessage {
-  type: RoomMessageType;
-  content?: string;
-  data?: any;
-  senderId?: string;
-  senderName?: string;
-  timestamp: number;
-  roomId: string;
-}
-
-export interface JoinRoomRequest {
-  playerId: string;
-  password?: string;
-}
-
-export interface CreateRoomRequest {
-  title: string;
-  difficulty?: "EASY" | "NORMAL" | "HARD";
-  mainCategory?: string;
-  subCategory?: string;
-  capacity?: number;
-  isPrivate?: boolean;
-  password?: string;
-} 
+  | "CHAT"; 
