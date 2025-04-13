@@ -399,8 +399,9 @@ export default function RoomPage() {
         
         // 플레이어 목록이 있고 플레이어가 없는 경우에만 처리
         // (이는 /topic/room/{id} 채널의 플레이어 목록 관리를 보완하는 역할)
-        if (Array.isArray(status.players) && status.players.length > 0 && players.length === 0) {
-          console.log("방 상태 업데이트: 플레이어 목록 초기화");
+        if (Array.isArray(status.players) && status.players.length > 0) {
+          // players 배열이 비어있는 경우에만 초기화
+          const shouldReplaceEntireList = players.length === 0;
           
           // 유효성 검사 및 형식 통일화
           const validPlayers = status.players
@@ -419,7 +420,46 @@ export default function RoomPage() {
               };
             });
             
-            if (validPlayers.length > 0) {
+          if (validPlayers.length > 0) {
+            // 전체 목록 교체가 아닌 경우, status 메시지의 플레이어 목록이 불완전할 수 있음
+            if (!shouldReplaceEntireList) {
+              console.log("상태 채널에서 플레이어 정보 업데이트 (병합)");
+              
+              // 기존 플레이어 목록 유지하면서 업데이트
+              setPlayers(prevPlayers => {
+                // 기존 플레이어를 ID 기준으로 맵으로 변환
+                const prevPlayersMap = new Map(prevPlayers.map(p => [p.id, p]));
+                
+                // 새 플레이어 정보로 업데이트
+                validPlayers.forEach((newPlayer: PlayerProfile) => {
+                  prevPlayersMap.set(newPlayer.id, newPlayer);
+                });
+                
+                // room.players 배열이 있으면 현재 방에 있는 플레이어만 필터링
+                if (status.room && Array.isArray(status.room.players) && status.room.players.length > 0) {
+                  // 서버에서 전달된 ID 목록으로 현재 방에 있는 플레이어 확인
+                  const roomPlayerIds = status.room.players.map((id: number | string) => String(id));
+                  
+                  // 현재 방에 있는 플레이어만 유지 (단, 현재 사용자는 항상 유지)
+                  for (const [playerId, player] of prevPlayersMap.entries()) {
+                    const isCurrentUser = currentUser && playerId === currentUser.id.toString();
+                    const isInRoom = roomPlayerIds.includes(playerId);
+                    
+                    if (!isInRoom && !isCurrentUser) {
+                      console.log(`플레이어 제거: ${player.nickname}(${playerId}) - 더 이상 방에 없음`);
+                      prevPlayersMap.delete(playerId);
+                    }
+                  }
+                }
+                
+                const mergedPlayers = Array.from(prevPlayersMap.values());
+                console.log("플레이어 목록 병합 결과:", mergedPlayers);
+                return mergedPlayers;
+              });
+            } else {
+              // 처음 로드 시 플레이어 목록이 비어있을 때
+              console.log("방 상태 업데이트: 플레이어 목록 초기화");
+              
               // 현재 사용자가 목록에 없는 경우 추가
               if (currentUser && !validPlayers.some((p: PlayerProfile) => p.id === currentUser.id.toString())) {
                 const isCurrentUserOwner = room && room.ownerId === currentUser.id;
@@ -435,8 +475,9 @@ export default function RoomPage() {
               }
               
               setPlayers(validPlayers);
-              console.log("상태 채널에서 업데이트된 플레이어 목록:", validPlayers);
+              console.log("상태 채널에서 초기 플레이어 목록 설정:", validPlayers);
             }
+          }
         }
       } catch (e) {
         console.error("방 상태 업데이트 메시지 처리 오류:", e, "원본 메시지:", message);
