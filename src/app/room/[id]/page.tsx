@@ -203,8 +203,13 @@ export default function RoomPage() {
             // 문자열인 경우 JSON으로 파싱
             let playersData;
             if (typeof data.data === 'string') {
-              playersData = JSON.parse(data.data);
-              console.log("JSON 파싱 후 플레이어 데이터:", playersData);
+              try {
+                playersData = JSON.parse(data.data);
+                console.log("JSON 파싱 후 플레이어 데이터:", playersData);
+              } catch (parseError) {
+                console.error("플레이어 데이터 JSON 파싱 실패:", parseError);
+                return;
+              }
             } else if (Array.isArray(data.data)) {
               playersData = data.data;
               console.log("배열 형태의 플레이어 데이터:", playersData);
@@ -213,38 +218,63 @@ export default function RoomPage() {
               return;
             }
             
+            // 플레이어 데이터가 유효한지 확인
+            if (!Array.isArray(playersData)) {
+              console.warn("플레이어 데이터가 배열이 아닙니다:", playersData);
+              return;
+            }
+            
             // 플레이어 목록이 비어있을 경우, 현재 플레이어 목록이 있다면 유지
-            if (Array.isArray(playersData)) {
-              if (playersData.length === 0 && players.length > 0) {
-                console.log("서버에서 빈 플레이어 목록이 전송됨, 현재 목록 유지:", players);
-              } else if (playersData.length > 0) {
-                console.log(`서버에서 ${playersData.length}명의 플레이어 목록 수신`);
-                setPlayers(playersData);
+            if (playersData.length === 0 && players.length > 0) {
+              console.log("서버에서 빈 플레이어 목록이 전송됨, 현재 목록 유지:", players);
+              return;
+            } 
+            
+            if (playersData.length > 0) {
+              console.log(`서버에서 ${playersData.length}명의 플레이어 목록 수신`);
+              
+              // 플레이어 데이터 형식 통일화 (일부는 ID가 숫자, 일부는 문자열일 수 있음)
+              const formattedPlayers = playersData.map((player: any) => {
+                // ID가 숫자면 문자열로 변환
+                const id = typeof player.id === 'number' ? String(player.id) : player.id;
                 
-                // 현재 사용자의 준비 상태 확인
-                if (currentUserId) {
-                  console.log("현재 사용자 ID:", currentUserId);
-                  // ID가 숫자인지 문자열인지 확인
-                  const currentPlayer = playersData.find((player: any) => {
-                    const playerId = typeof player.id === 'string' ? player.id : String(player.id);
-                    const currentId = typeof currentUserId === 'string' ? currentUserId : String(currentUserId);
-                    console.log(`비교: 플레이어 ID ${playerId} vs 현재 ID ${currentId}`);
-                    return playerId === currentId;
-                  });
-                  
-                  if (currentPlayer) {
-                    console.log("현재 사용자 준비 상태:", currentPlayer.isReady);
-                    setIsReady(currentPlayer.isReady || false);
-                  } else {
-                    console.log("현재 사용자를 플레이어 목록에서 찾을 수 없음");
-                  }
+                return {
+                  ...player,
+                  id,
+                  // 필수 필드가 없는 경우 기본값 설정
+                  name: player.name || player.nickname || '사용자',
+                  nickname: player.nickname || player.name || '사용자',
+                  isOwner: Boolean(player.isOwner),
+                  isReady: Boolean(player.isReady),
+                  avatarUrl: player.avatarUrl || DEFAULT_AVATAR,
+                  // 중복 방지를 위한 고유 세션 ID (없는 경우)
+                  sessionId: player.sessionId || `session-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`
+                };
+              });
+              
+              setPlayers(formattedPlayers);
+              
+              // 현재 사용자의 준비 상태 확인
+              if (currentUserId) {
+                console.log("현재 사용자 ID:", currentUserId);
+                // ID가 숫자인지 문자열인지 확인
+                const currentPlayer = formattedPlayers.find((player: any) => {
+                  const playerId = player.id;
+                  const currentId = typeof currentUserId === 'string' ? currentUserId : String(currentUserId);
+                  console.log(`비교: 플레이어 ID ${playerId} vs 현재 ID ${currentId}`);
+                  return playerId === currentId;
+                });
+                
+                if (currentPlayer) {
+                  console.log("현재 사용자 준비 상태:", currentPlayer.isReady);
+                  setIsReady(currentPlayer.isReady || false);
+                } else {
+                  console.log("현재 사용자를 플레이어 목록에서 찾을 수 없음");
                 }
               }
-            } else {
-              console.log("플레이어 목록이 배열이 아님:", playersData);
             }
           } catch (error) {
-            console.error("플레이어 데이터 파싱 오류:", error);
+            console.error("플레이어 데이터 처리 오류:", error);
           }
         } else {
           console.log("메시지에 data 필드가 없음");
@@ -342,22 +372,58 @@ export default function RoomPage() {
           // 새로운 플레이어 목록
           const newPlayers = status.players || [];
           
+          // 서버에서 room.players 배열을 함께 보내는 경우 - 두 정보 통합 처리
+          if (status.room && Array.isArray(status.room.players) && status.room.players.length > 0) {
+            console.log("room.players 배열 감지됨:", status.room.players);
+            
+            // room.players 배열이 있지만 players 배열이 비어있으면 무시 안함
+            if (newPlayers.length === 0) {
+              console.log("players 배열은 비어있지만 room.players 정보가 있어 처리 계속 진행");
+            }
+          }
+          
           // 플레이어 목록이 비어있고 이전에 플레이어가 있었다면 유지
-          if (newPlayers.length === 0 && prevPlayers.length > 0) {
+          // room.players 배열이 있는 경우에는 계속 진행
+          if (newPlayers.length === 0 && prevPlayers.length > 0 && 
+              !(status.room && Array.isArray(status.room.players) && status.room.players.length > 0)) {
             console.log("빈 플레이어 목록 수신됨, 현재 플레이어 유지", prevPlayers);
             return prevPlayers;
           }
           
+          // --------- 서버 데이터 통합 처리 ---------
+          
+          // 실제 처리할 플레이어 목록 준비
+          let processedPlayers = [...newPlayers];
+          
+          // 서버에서 room.players 배열을 id 목록으로 보내는 경우, 기존 플레이어 정보와 통합
+          if (status.room && Array.isArray(status.room.players) && status.room.players.length > 0) {
+            // room.players에는 ID만 있고 players 배열이 비어있는 경우 
+            // 기존 플레이어 중에서 해당 ID를 가진 플레이어만 필터링하여 유지
+            if (newPlayers.length === 0) {
+              console.log("room.players의 ID 목록으로 플레이어 필터링:", status.room.players);
+              
+              const roomPlayerIds = status.room.players.map((id: number | string) => String(id));
+              const filteredPrevPlayers = prevPlayers.filter(p => 
+                roomPlayerIds.includes(p.id)
+              );
+              
+              if (filteredPrevPlayers.length > 0) {
+                console.log("기존 플레이어 중 room.players에 있는 ID와 일치하는 플레이어:", filteredPrevPlayers);
+                processedPlayers = filteredPrevPlayers;
+              }
+            }
+          }
+          
           // 올바른 형식의 플레이어 객체인지 검증
-          const validatedPlayers = newPlayers.filter((p: any) => {
+          const validatedPlayers = processedPlayers.filter((p: any) => {
             // 필수 필드 확인
             if (!p || typeof p !== 'object') return false;
             // id가 있는지 확인
             return p.id !== undefined;
           });
           
-          if (validatedPlayers.length < newPlayers.length) {
-            console.warn(`유효하지 않은 플레이어 데이터 ${newPlayers.length - validatedPlayers.length}개 제외됨`);
+          if (validatedPlayers.length < processedPlayers.length) {
+            console.warn(`유효하지 않은 플레이어 데이터 ${processedPlayers.length - validatedPlayers.length}개 제외됨`);
           }
           
           // ID 중복 검사 및 로깅
@@ -685,7 +751,7 @@ export default function RoomPage() {
       // 방 정보에 현재 인원 업데이트
       if (room) {
         setRoom(prevRoom => ({
-          ...prevRoom, 
+          ...prevRoom,
           currentPlayers: Math.max(1, prevRoom?.currentPlayers || 0)
         }));
       }
