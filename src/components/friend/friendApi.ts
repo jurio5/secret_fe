@@ -81,7 +81,7 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
       nickname: member.nickname,
       avatarUrl: member.avatarUrl,
       level: member.level,
-      status: 'NONE' // 기본 상태
+      status: member.status || 'NONE' // 서버에서 상태 정보가 있으면 사용, 없으면 'NONE'으로 기본값 설정
     })) as FriendSearchResult[];
   } catch (error) {
     console.error("사용자 검색에 실패했습니다:", error);
@@ -131,7 +131,7 @@ export const searchUserByNicknameWithClient = async (nickname: string): Promise<
       nickname: member.nickname,
       avatarUrl: member.avatarUrl,
       level: member.level,
-      status: 'NONE' // 기본 상태
+      status: member.status || 'NONE' // 서버에서 상태 정보가 있으면 사용, 없으면 'NONE'으로 기본값 설정
     })) as FriendSearchResult[];
   } catch (error) {
     console.error("사용자 검색에 실패했습니다:", error);
