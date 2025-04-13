@@ -54,6 +54,11 @@ const FriendList: React.FC<FriendListProps> = ({ friendList, isLoading, onDelete
                           fill
                           sizes="40px"
                           className="object-cover"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.onerror = null;
+                            target.src = "https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png";
+                          }}
                         />
                       </div>
                     ) : (
