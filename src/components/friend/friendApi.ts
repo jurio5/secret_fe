@@ -8,6 +8,9 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_WAS_HOST || 'https://quizzle.p-e.kr
 // 기본 아바타 URL
 const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';
 
+// 친구 온라인 상태 캐시 (세션 내에서 일관성 유지를 위함)
+const friendOnlineStatusCache: Record<number, boolean> = {};
+
 // 현재 로그인한 사용자 정보 가져오기
 const getCurrentUser = async () => {
   try {
@@ -43,8 +46,14 @@ export const getFriendList = async (): Promise<Friend[]> => {
     
     // 데이터 가공: 아바타 URL이 없거나 온라인 상태가 없는 경우 모킹 데이터로 강화
     friends = friends.map(friend => {
-      // 현재 시간 기준 랜덤 온라인 상태 생성 (예시용, 실제로는 서버에서 받아와야 함)
-      const isOnline = Math.random() > 0.5;
+      // 친구 ID를 기준으로 온라인 상태 일관성 유지
+      // 캐시에 없는 경우에만 랜덤 상태 생성 및 저장
+      if (friendOnlineStatusCache[friend.memberId] === undefined) {
+        friendOnlineStatusCache[friend.memberId] = Math.random() > 0.5;
+      }
+      
+      // 캐시된 온라인 상태 사용
+      const isOnline = friendOnlineStatusCache[friend.memberId];
       
       // 아바타 URL이 없는 경우 기본 아바타 제공
       const avatarUrl = friend.avatarUrl || DEFAULT_AVATAR;
