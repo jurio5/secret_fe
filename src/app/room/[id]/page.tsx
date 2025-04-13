@@ -38,7 +38,7 @@ export default function RoomPage() {
   const fetchRoomData = async () => {
     setLoading(true);
     try {
-      const response = await client.GET(`/api/v1/rooms/${roomId}`, {}) as ApiResponse<RoomResponse>;
+      const response = await (client.GET as any)(`/api/v1/rooms/${roomId}`, {}) as ApiResponse<RoomResponse>;
       
       if (response.error) {
         setError(response.error.message || "방 정보를 불러오는데 실패했습니다.");
@@ -120,7 +120,7 @@ export default function RoomPage() {
   // 방 입장 처리
   const joinRoom = async () => {
     try {
-      await client.POST(`/api/v1/rooms/${roomId}/join`, {});
+      await (client.POST as any)(`/api/v1/rooms/${roomId}/join`, {});
       
       // 입장 성공 시 메시지를 방에 전송
       publish(`/app/rooms/${roomId}/join`, {
@@ -145,7 +145,7 @@ export default function RoomPage() {
   // 준비 상태 토글
   const toggleReady = async () => {
     try {
-      await client.POST(`/api/v1/rooms/${roomId}/ready`, {});
+      await (client.POST as any)(`/api/v1/rooms/${roomId}/ready`, {});
       setIsReady(!isReady);
       
       // 준비 상태 메시지 전송
@@ -167,7 +167,7 @@ export default function RoomPage() {
     }
     
     try {
-      await client.POST(`/api/v1/rooms/${roomId}/start`, {});
+      await (client.POST as any)(`/api/v1/rooms/${roomId}/start`, {});
       
       // 게임 시작 메시지 전송
       publish(`/app/rooms/${roomId}/start`, {
@@ -183,7 +183,7 @@ export default function RoomPage() {
   // 방 퇴장
   const leaveRoom = async () => {
     try {
-      await client.POST(`/api/v1/rooms/${roomId}/leave`, {});
+      await (client.POST as any)(`/api/v1/rooms/${roomId}/leave`, {});
       
       // 퇴장 메시지 전송
       publish(`/app/rooms/${roomId}/leave`, {
