@@ -86,6 +86,11 @@ function LobbyContent() {
   const [isLoadingUser, setIsLoadingUser] = useState<boolean>(false);
   const [showRankingModal, setShowRankingModal] = useState<boolean>(false);
   const [showFriendModal, setShowFriendModal] = useState<boolean>(false);
+  // 방 생성 모달 상태 추가
+  const [showCreateRoomModal, setShowCreateRoomModal] = useState<boolean>(false);
+  // 방 생성 관련 상태 추가
+  const [isCreatingRoom, setIsCreatingRoom] = useState<boolean>(false);
+  const [roomCreateError, setRoomCreateError] = useState<string>("");
   
   // 세션 로딩 재시도 횟수 관리
   const userLoadRetryCountRef = useRef<number>(0);
@@ -1125,7 +1130,17 @@ function LobbyContent() {
             <div className="flex flex-wrap gap-4 mb-6">
               <button 
                 className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-3 rounded-lg font-medium transition-all shadow-lg shadow-blue-900/20 hover:shadow-blue-900/40"
-                onClick={() => alert("퀴즈룸 생성 기능은 준비 중입니다.")}
+                onClick={() => {
+                  if (!currentUser) {
+                    setToast({
+                      type: "error",
+                      message: "로그인 후 이용 가능합니다.",
+                      duration: 3000
+                    });
+                    return;
+                  }
+                  setShowCreateRoomModal(true);
+                }}
               >
                 새 퀴즈룸 만들기
               </button>
@@ -1662,6 +1677,345 @@ function LobbyContent() {
       {/* 친구 모달 */}
       {showFriendModal && (
         <FriendModal isOpen={showFriendModal} onClose={() => setShowFriendModal(false)} />
+      )}
+
+      {/* 방 생성 모달 */}
+      {showCreateRoomModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-800/90 border border-gray-700 rounded-2xl shadow-2xl max-w-2xl w-full mx-4 p-6 relative overflow-y-auto max-h-[90vh]">
+            {/* 닫기 버튼 */}
+            <button 
+              onClick={() => setShowCreateRoomModal(false)}
+              className="absolute top-4 right-4 bg-gray-700 hover:bg-gray-600 p-1.5 rounded-full text-white"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            
+            <h2 className="text-2xl font-bold text-white mb-6">새 퀴즈룸 만들기</h2>
+            
+            {roomCreateError && (
+              <div className="bg-red-900/30 text-red-400 p-3 rounded-lg mb-4 border border-red-800/30">
+                {roomCreateError}
+              </div>
+            )}
+            
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              
+              if (isCreatingRoom) return;
+              
+              // 폼 데이터 가져오기
+              const formData = new FormData(e.currentTarget);
+              const title = formData.get('title') as string;
+              const capacity = parseInt(formData.get('capacity') as string);
+              const difficulty = formData.get('difficulty') as string;
+              const mainCategory = formData.get('mainCategory') as string;
+              const subCategory = formData.get('subCategory') as string;
+              const answerType = formData.get('answerType') as string;
+              const problemCount = parseInt(formData.get('problemCount') as string);
+              const isPrivate = formData.get('isPrivate') === 'on';
+              const password = formData.get('password') as string;
+              
+              // 유효성 검사
+              if (!title || title.trim() === '') {
+                setRoomCreateError("방 제목을 입력해주세요.");
+                return;
+              }
+              
+              if (title.length > 30) {
+                setRoomCreateError("방 제목은 30자 이내로 입력해주세요.");
+                return;
+              }
+              
+              if (isNaN(capacity) || capacity < 1 || capacity > 8) {
+                setRoomCreateError("최대 인원은 1-8명 사이로 설정해주세요.");
+                return;
+              }
+              
+              if (!difficulty) {
+                setRoomCreateError("난이도를 선택해주세요.");
+                return;
+              }
+              
+              if (!mainCategory) {
+                setRoomCreateError("메인 카테고리를 선택해주세요.");
+                return;
+              }
+              
+              if (!subCategory) {
+                setRoomCreateError("서브 카테고리를 선택해주세요.");
+                return;
+              }
+              
+              if (!answerType) {
+                setRoomCreateError("답변 유형을 선택해주세요.");
+                return;
+              }
+              
+              if (isNaN(problemCount) || problemCount < 10 || problemCount > 50) {
+                setRoomCreateError("문제 수는 10-50개 사이로 설정해주세요.");
+                return;
+              }
+              
+              if (isPrivate && (!password || !password.match(/^\d{4}$/))) {
+                setRoomCreateError("비공개 방은 4자리 숫자 비밀번호가 필요합니다.");
+                return;
+              }
+              
+              // 방 생성 요청
+              setIsCreatingRoom(true);
+              setRoomCreateError("");
+              
+              try {
+                const response = await client.POST("/api/v1/rooms", {
+                  body: {
+                    title,
+                    capacity,
+                    difficulty: difficulty as "EASY" | "NORMAL" | "HARD",
+                    mainCategory: mainCategory as "SCIENCE" | "HISTORY" | "LANGUAGE" | "GENERAL_KNOWLEDGE",
+                    subCategory: subCategory as "PHYSICS" | "CHEMISTRY" | "BIOLOGY" | "WORLD_HISTORY" | "KOREAN_HISTORY" | "KOREAN" | "ENGLISH" | "CURRENT_AFFAIRS" | "CULTURE" | "SPORTS",
+                    answerType: answerType as "MULTIPLE_CHOICE" | "TRUE_FALSE",
+                    problemCount,
+                    isPrivate,
+                    password: isPrivate ? password : undefined
+                  }
+                }) as ApiResponse<RoomResponse>;
+                
+                if (response.error) {
+                  setRoomCreateError(response.error.message || "방 생성에 실패했습니다.");
+                  return;
+                }
+                
+                if (response.data?.data) {
+                  const roomId = response.data.data.id;
+                  
+                  // 방 생성 성공 메시지
+                  setToast({
+                    type: "success",
+                    message: "퀴즈룸이 생성되었습니다!",
+                    duration: 3000
+                  });
+                  
+                  // 방 생성 모달 닫기
+                  setShowCreateRoomModal(false);
+                  
+                  // 방 페이지로 이동하는 대신 임시 메시지 표시
+                  setToast({
+                    type: "info",
+                    message: `방 ${roomId}번이 생성되었습니다. 입장 기능은 개발 중입니다.`,
+                    duration: 5000
+                  });
+                  
+                  // 방 목록 새로고침
+                  loadRooms();
+                  
+                  // 실제 방 페이지가 개발되면 아래 코드 활성화
+                  // router.push(`/room/${roomId}`);
+                }
+              } catch (error) {
+                console.error("방 생성 중 오류 발생:", error);
+                setRoomCreateError("방 생성에 실패했습니다. 다시 시도해주세요.");
+              } finally {
+                setIsCreatingRoom(false);
+              }
+            }} className="space-y-4">
+              {/* 방 제목 */}
+              <div>
+                <label htmlFor="title" className="block text-sm font-medium text-gray-300 mb-1">방 제목</label>
+                <input 
+                  type="text" 
+                  id="title" 
+                  name="title" 
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="방 제목을 입력하세요 (최대 30자)"
+                  maxLength={30}
+                />
+              </div>
+              
+              {/* 최대 인원 */}
+              <div>
+                <label htmlFor="capacity" className="block text-sm font-medium text-gray-300 mb-1">최대 인원</label>
+                <select 
+                  id="capacity" 
+                  name="capacity" 
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {[1, 2, 3, 4, 5, 6, 7, 8].map(num => (
+                    <option key={num} value={num}>{num}명</option>
+                  ))}
+                </select>
+              </div>
+              
+              {/* 난이도 */}
+              <div>
+                <label htmlFor="difficulty" className="block text-sm font-medium text-gray-300 mb-1">난이도</label>
+                <select 
+                  id="difficulty" 
+                  name="difficulty" 
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="EASY">쉬움</option>
+                  <option value="NORMAL">보통</option>
+                  <option value="HARD">어려움</option>
+                </select>
+              </div>
+              
+              {/* 메인 카테고리 */}
+              <div>
+                <label htmlFor="mainCategory" className="block text-sm font-medium text-gray-300 mb-1">메인 카테고리</label>
+                <select 
+                  id="mainCategory" 
+                  name="mainCategory" 
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => {
+                    // 서브 카테고리 업데이트 로직 (필요하면 추가)
+                    const subCategorySelect = document.getElementById('subCategory') as HTMLSelectElement;
+                    const selectedMainCategory = e.target.value;
+                    
+                    // 서브 카테고리 옵션 필터링
+                    Array.from(subCategorySelect.options).forEach(option => {
+                      const optionElement = option as HTMLOptionElement;
+                      const isVisible = optionElement.dataset.main === selectedMainCategory;
+                      optionElement.hidden = !isVisible;
+                      optionElement.disabled = !isVisible;
+                    });
+                    
+                    // 첫 번째 가능한 서브 카테고리 선택
+                    const firstVisibleOption = Array.from(subCategorySelect.options).find(
+                      option => (option as HTMLOptionElement).dataset.main === selectedMainCategory
+                    ) as HTMLOptionElement | undefined;
+                    
+                    if (firstVisibleOption) {
+                      subCategorySelect.value = firstVisibleOption.value;
+                    }
+                  }}
+                >
+                  <option value="SCIENCE">과학</option>
+                  <option value="HISTORY">역사</option>
+                  <option value="LANGUAGE">언어</option>
+                  <option value="GENERAL_KNOWLEDGE">일반 상식</option>
+                </select>
+              </div>
+              
+              {/* 서브 카테고리 */}
+              <div>
+                <label htmlFor="subCategory" className="block text-sm font-medium text-gray-300 mb-1">서브 카테고리</label>
+                <select 
+                  id="subCategory" 
+                  name="subCategory" 
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="PHYSICS" data-main="SCIENCE">물리학</option>
+                  <option value="CHEMISTRY" data-main="SCIENCE">화학</option>
+                  <option value="BIOLOGY" data-main="SCIENCE">생물학</option>
+                  
+                  <option value="WORLD_HISTORY" data-main="HISTORY" hidden disabled>세계사</option>
+                  <option value="KOREAN_HISTORY" data-main="HISTORY" hidden disabled>한국사</option>
+                  
+                  <option value="KOREAN" data-main="LANGUAGE" hidden disabled>한국어</option>
+                  <option value="ENGLISH" data-main="LANGUAGE" hidden disabled>영어</option>
+                  
+                  <option value="CURRENT_AFFAIRS" data-main="GENERAL_KNOWLEDGE" hidden disabled>시사</option>
+                  <option value="CULTURE" data-main="GENERAL_KNOWLEDGE" hidden disabled>문화</option>
+                  <option value="SPORTS" data-main="GENERAL_KNOWLEDGE" hidden disabled>스포츠</option>
+                </select>
+              </div>
+              
+              {/* 답변 유형 */}
+              <div>
+                <label htmlFor="answerType" className="block text-sm font-medium text-gray-300 mb-1">답변 유형</label>
+                <select 
+                  id="answerType" 
+                  name="answerType" 
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="MULTIPLE_CHOICE">객관식</option>
+                  <option value="TRUE_FALSE">O/X</option>
+                </select>
+              </div>
+              
+              {/* 문제 수 */}
+              <div>
+                <label htmlFor="problemCount" className="block text-sm font-medium text-gray-300 mb-1">문제 수</label>
+                <select 
+                  id="problemCount" 
+                  name="problemCount" 
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {[10, 20, 30, 40, 50].map(num => (
+                    <option key={num} value={num}>{num}개</option>
+                  ))}
+                </select>
+              </div>
+              
+              {/* 비공개 방 설정 */}
+              <div className="flex items-center mb-2">
+                <input 
+                  type="checkbox" 
+                  id="isPrivate" 
+                  name="isPrivate" 
+                  className="w-4 h-4 text-blue-600 border-gray-500 rounded focus:ring-blue-500"
+                  onChange={(e) => {
+                    const passwordInput = document.getElementById('password') as HTMLInputElement;
+                    if (e.target.checked) {
+                      passwordInput.disabled = false;
+                      passwordInput.classList.remove('bg-gray-800');
+                      passwordInput.classList.add('bg-gray-700');
+                    } else {
+                      passwordInput.disabled = true;
+                      passwordInput.value = '';
+                      passwordInput.classList.remove('bg-gray-700');
+                      passwordInput.classList.add('bg-gray-800');
+                    }
+                  }}
+                />
+                <label htmlFor="isPrivate" className="ml-2 text-sm font-medium text-gray-300">비공개 방</label>
+              </div>
+              
+              {/* 비밀번호 */}
+              <div>
+                <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1">비밀번호 (4자리 숫자)</label>
+                <input 
+                  type="password" 
+                  id="password" 
+                  name="password" 
+                  disabled
+                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="0000"
+                  maxLength={4}
+                  pattern="\d{4}"
+                  title="4자리 숫자를 입력해주세요."
+                />
+                <p className="text-xs text-gray-400 mt-1">비공개 방은 4자리 숫자 비밀번호가 필요합니다.</p>
+              </div>
+              
+              {/* 제출 버튼 */}
+              <div className="pt-4">
+                <button
+                  type="submit"
+                  disabled={isCreatingRoom}
+                  className={`w-full ${
+                    isCreatingRoom
+                      ? "bg-gray-600 cursor-not-allowed"
+                      : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+                  } text-white py-3 rounded-lg font-medium transition-all`}
+                >
+                  {isCreatingRoom ? (
+                    <div className="flex items-center justify-center">
+                      <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      방 생성 중...
+                    </div>
+                  ) : "방 생성하기"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
