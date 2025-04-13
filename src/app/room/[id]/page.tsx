@@ -66,12 +66,15 @@ const translateSubCategory = (subCategory?: string): string => {
 };
 
 interface PlayerProfile {
-  id: number;
+  id: string;
   name: string;
   nickname: string;
   isOwner: boolean | null;
   isReady: boolean;
   avatarUrl: string;
+  _uniqueId?: string; // 중복 플레이어 구분용 고유 ID
+  sessionId?: string; // 세션 구분용 ID
+  team?: string; // 팀 구분
 }
 
 export default function RoomPage() {
@@ -357,24 +360,73 @@ export default function RoomPage() {
             console.warn(`유효하지 않은 플레이어 데이터 ${newPlayers.length - validatedPlayers.length}개 제외됨`);
           }
           
+          // ID 중복 검사 및 로깅
+          const idCounts = new Map<string, number>();
+          validatedPlayers.forEach((p: any) => {
+            const id = typeof p.id === 'string' ? p.id : String(p.id);
+            idCounts.set(id, (idCounts.get(id) || 0) + 1);
+          });
+          
+          // 중복 ID가 있는지 확인
+          const duplicateIds = Array.from(idCounts.entries())
+            .filter(([_, count]) => count > 1)
+            .map(([id]) => id);
+            
+          if (duplicateIds.length > 0) {
+            console.warn("중복된 ID가 발견되었습니다:", duplicateIds);
+            
+            // 중복 ID 처리: 각 중복 항목에 고유 식별자 추가
+            let counter = 0;
+            const uniquePlayers = validatedPlayers.map((player: any) => {
+              const playerId = typeof player.id === 'string' ? player.id : String(player.id);
+              if (duplicateIds.includes(playerId)) {
+                // 현재 로그인된 사용자와 동일한 ID이면 수정하지 않음
+                if (currentUser && currentUser.id.toString() === playerId) {
+                  return player;
+                }
+                // 다른 중복 ID에는 고유 식별자 추가
+                counter++;
+                return {
+                  ...player,
+                  _uniqueId: `${playerId}-${counter}`,
+                  id: `${playerId}-${counter}`
+                };
+              }
+              return player;
+            });
+            
+            // 중복 처리된 플레이어 목록으로 교체
+            console.log("중복 ID 처리 후 플레이어 목록:", uniquePlayers);
+            validatedPlayers.length = 0;
+            validatedPlayers.push(...uniquePlayers);
+          }
+          
           // 기존 플레이어를 ID 기준으로 맵으로 변환
           const prevPlayersMap = new Map(prevPlayers.map(p => [p.id, p]));
           
           // 새 플레이어 목록과 기존 목록 병합
           const mergedPlayers: PlayerProfile[] = [];
           
+          // 디버깅 정보 출력
+          console.log("플레이어 병합 시작 - 새 플레이어:", validatedPlayers.length, "기존 플레이어:", prevPlayers.length);
+          
           // 새 플레이어 목록의 각 플레이어 처리
           validatedPlayers.forEach((newPlayer: any) => {
             const playerId = typeof newPlayer.id === 'string' ? newPlayer.id : String(newPlayer.id);
+            console.log(`플레이어 처리: ID=${playerId}, 닉네임=${newPlayer.nickname || '익명'}`);
+            
             // 기존 목록에 있는지 확인
             const existingPlayer = prevPlayersMap.get(playerId);
             if (existingPlayer) {
               // 있으면 정보 업데이트하되 기존 정보도 보존
-              mergedPlayers.push({...existingPlayer, ...newPlayer});
+              const updatedPlayer = {...existingPlayer, ...newPlayer};
+              mergedPlayers.push(updatedPlayer);
+              console.log(`- 기존 플레이어 업데이트: ${updatedPlayer.nickname}`);
               prevPlayersMap.delete(playerId); // 처리됨 표시
             } else {
               // 없으면 새로 추가
               mergedPlayers.push(newPlayer as PlayerProfile);
+              console.log(`- 새 플레이어 추가: ${newPlayer.nickname || '익명'}`);
             }
           });
           
@@ -382,7 +434,7 @@ export default function RoomPage() {
           if (currentUser && !mergedPlayers.some(p => p.id === currentUser.id.toString())) {
             const currentPlayerInPrevList = prevPlayers.find(p => p.id === currentUser.id.toString());
             if (currentPlayerInPrevList) {
-              console.log("현재 사용자가 새 목록에 없어 추가됨:", currentPlayerInPrevList);
+              console.log("현재 사용자가 새 목록에 없어 추가됨:", currentPlayerInPrevList.nickname);
               mergedPlayers.push(currentPlayerInPrevList);
             }
           }
@@ -623,7 +675,8 @@ export default function RoomPage() {
         nickname: currentUser.nickname || '사용자',
         isOwner: isCurrentUserOwner,
         isReady: false,
-        avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR
+        avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR,
+        sessionId: `session-${Date.now()}-${Math.random().toString(36).substring(2, 9)}` // 고유 세션 ID 생성
       };
       
       console.log("생성된 플레이어 정보:", newPlayer);
@@ -1141,7 +1194,7 @@ export default function RoomPage() {
                         <div className="flex flex-col sm:flex-row sm:justify-between">
                           <p className="text-white font-medium text-lg">{player.nickname || '익명 사용자'}</p>
                           {/* 현재 사용자 표시 */}
-                          {currentUserId === player.id && (
+                          {currentUserId !== null && currentUserId.toString() === player.id && (
                             <span className="px-2 py-0.5 bg-blue-900/50 text-blue-400 text-xs rounded-md inline-block mt-1 sm:mt-0">나</span>
                           )}
                         </div>
