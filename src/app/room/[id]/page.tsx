@@ -263,6 +263,7 @@ function RoomContent() {
         
         // 방 정보 업데이트
         if (status.room) {
+          console.log("방 정보 업데이트:", status.room);
           setRoom(prevRoom => {
             if (!prevRoom) return status.room;
             return { ...prevRoom, ...status.room };
@@ -277,7 +278,11 @@ function RoomContent() {
         
         // 플레이어 목록 업데이트
         if (status.players && Array.isArray(status.players)) {
+          console.log("플레이어 목록 업데이트 전:", players);
+          console.log("받은 플레이어 목록:", status.players);
+          
           setPlayers(status.players);
+          console.log("플레이어 목록 업데이트 후 (예정):", status.players);
           
           // 자신의 준비 상태 확인
           if (currentUser) {
@@ -369,11 +374,19 @@ function RoomContent() {
         isReady: false
       };
       
+      console.log("플레이어 목록에 자신 추가 시도:", newPlayer);
+      console.log("현재 플레이어 목록:", players);
+      
       setPlayers(prev => {
         const existingPlayer = prev.find(p => p.id === currentUser.id.toString());
-        if (existingPlayer) return prev;
+        if (existingPlayer) {
+          console.log("이미 플레이어 목록에 있음:", existingPlayer);
+          return prev;
+        }
         
-        return [...prev, newPlayer];
+        const updatedPlayers = [...prev, newPlayer];
+        console.log("업데이트된 플레이어 목록:", updatedPlayers);
+        return updatedPlayers;
       });
       
       // Room 객체의 players 목록과 currentPlayers 값 함께 업데이트
@@ -387,6 +400,12 @@ function RoomContent() {
         if (!playerIds.includes(playerId)) {
           playerIds = [...playerIds, playerId];
         }
+        
+        console.log("업데이트된 룸 정보:", { 
+          ...prev,
+          players: playerIds,
+          currentPlayers: playerIds.length 
+        });
         
         return {
           ...prev,
@@ -665,12 +684,65 @@ function RoomContent() {
     // 컴포넌트 마운트 후 방 상태 및 플레이어 목록 주기적으로 요청
     const statusInterval = setInterval(() => {
       if (isConnected && roomId && currentUser) {
-        // 방 상태 및 플레이어 목록 요청
+        console.log("방 상태 주기적 요청 시작");
+        
+        // 일반적인 방식으로 요청 - 서버에서 STATUS_RESPONSE 형태로 응답
         publish(`/app/room/status/${roomId}`, {
           type: "STATUS_REQUEST",
           roomId: parseInt(roomId),
           timestamp: Date.now()
         });
+        
+        // 추가로 서버에서 방 상태 요청 API 직접 호출 - REST API로 요청
+        const fetchCurrentRoomStatus = async () => {
+          try {
+            const response = await client.GET(`/api/v1/rooms/{roomId}`, {
+              params: { path: { roomId: parseInt(roomId) } }
+            }) as ApiResponse<RoomResponse>;
+            
+            if (response.data?.data) {
+              const roomData = response.data.data;
+              console.log("방 정보 API 응답:", roomData);
+              
+              // 방 정보 업데이트 
+              setRoom(roomData);
+              
+              // 방 정보에서 플레이어 ID 목록 추출
+              if (roomData.players && roomData.players.length > 0) {
+                console.log("방 정보에서 플레이어 목록 확인:", roomData.players);
+                
+                // 현재 플레이어 목록을 ID 기준으로 업데이트
+                setPlayers(prev => {
+                  // 이미 플레이어 목록에 있는 항목 유지
+                  const existingPlayers = prev.filter(player => 
+                    roomData.players?.includes(parseInt(player.id))
+                  );
+                  
+                  // 현재 사용자가 목록에 없으면 추가
+                  if (currentUser && 
+                      roomData.players?.includes(currentUser.id) && 
+                      !existingPlayers.some(p => p.id === currentUser.id.toString())) {
+                    existingPlayers.push({
+                      id: currentUser.id.toString(),
+                      nickname: currentUser.nickname,
+                      avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR,
+                      isOwner: roomData.ownerId === currentUser.id,
+                      isReady: false
+                    });
+                  }
+                  
+                  console.log("업데이트된 플레이어 목록:", existingPlayers);
+                  return existingPlayers;
+                });
+              }
+            }
+          } catch (error) {
+            console.error("방 상태 API 요청 실패:", error);
+          }
+        };
+        
+        // API로 상태 요청 (WebSocket이 안되는 경우 대비)
+        fetchCurrentRoomStatus();
         
         console.log("방 상태 및 플레이어 목록 요청 발송");
       }
@@ -848,6 +920,18 @@ function RoomContent() {
             players={players}
             currentUserId={currentUser?.id || null}
           />
+          {/* 방 정보 디버깅 */}
+          <div className="mt-2 p-2 bg-blue-500/20 rounded text-xs text-white">
+            <div>방 정보: {room ? JSON.stringify({
+              id: room.id,
+              title: room.title,
+              currentPlayers: room.currentPlayers,
+              capacity: room.capacity,
+              ownerId: room.ownerId
+            }) : '없음'}</div>
+            <div>플레이어 수: {players.length}</div>
+            <div>현재 사용자: {currentUser ? `${currentUser.id} (${currentUser.nickname})` : '없음'}</div>
+          </div>
           
           {/* 게임 조작 영역 */}
           <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-5">
