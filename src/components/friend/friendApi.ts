@@ -46,6 +46,10 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
   try {
     console.log(`검색 시도: nickname=${nickname}`);
     
+    // 현재 친구 목록을 가져옴
+    const friendList = await getFriendList();
+    const friendIds = friendList.map(friend => friend.memberId);
+    
     // client 객체를 통한 API 호출 - 타입 캐스팅으로 타입 오류 해결
     const response = await (client as any).GET("/api/v1/members/search", {
       params: {
@@ -76,13 +80,30 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
     console.log('검색 결과 데이터:', data);
     
     // 백엔드에서 반환된 데이터를 FriendSearchResult 형식으로 변환
-    return (data?.data || []).map((member: any) => ({
-      memberId: member.id,
-      nickname: member.nickname,
-      avatarUrl: member.avatarUrl,
-      level: member.level,
-      status: member.status || 'NONE' // 서버에서 상태 정보가 있으면 사용, 없으면 'NONE'으로 기본값 설정
-    })) as FriendSearchResult[];
+    return (data?.data || []).map((member: any) => {
+      // 현재 사용자 ID
+      const currentUserId = (window as any).__INITIAL_USER__?.memberId;
+      
+      // 상태 결정: 자신, 친구, 요청됨, 또는 백엔드에서 제공된 상태
+      let status = member.status || 'NONE';
+      
+      // 자신인 경우
+      if (member.id === currentUserId) {
+        status = 'SELF';
+      } 
+      // 이미 친구 목록에 있는 경우
+      else if (friendIds.includes(member.id)) {
+        status = 'FRIEND';
+      }
+      
+      return {
+        memberId: member.id,
+        nickname: member.nickname,
+        avatarUrl: member.avatarUrl,
+        level: member.level,
+        status: status
+      };
+    }) as FriendSearchResult[];
   } catch (error) {
     console.error("사용자 검색에 실패했습니다:", error);
     return [];
@@ -93,6 +114,10 @@ export const searchUserByNickname = async (nickname: string): Promise<FriendSear
 export const searchUserByNicknameWithClient = async (nickname: string): Promise<FriendSearchResult[]> => {
   try {
     console.log(`Client 객체로 검색 시도: nickname=${nickname}`);
+    
+    // 현재 친구 목록을 가져옴
+    const friendList = await getFriendList();
+    const friendIds = friendList.map(friend => friend.memberId);
     
     // client 객체를 any로 캐스팅하여 타입 오류 방지
     const response = await (client as any).GET("/api/v1/members/search", {
@@ -126,13 +151,30 @@ export const searchUserByNicknameWithClient = async (nickname: string): Promise<
     console.log('검색 결과 데이터:', data);
     
     // 백엔드에서 반환된 데이터를 FriendSearchResult 형식으로 변환
-    return (data?.data || []).map((member: any) => ({
-      memberId: member.id,
-      nickname: member.nickname,
-      avatarUrl: member.avatarUrl,
-      level: member.level,
-      status: member.status || 'NONE' // 서버에서 상태 정보가 있으면 사용, 없으면 'NONE'으로 기본값 설정
-    })) as FriendSearchResult[];
+    return (data?.data || []).map((member: any) => {
+      // 현재 사용자 ID
+      const currentUserId = (window as any).__INITIAL_USER__?.memberId;
+      
+      // 상태 결정: 자신, 친구, 요청됨, 또는 백엔드에서 제공된 상태
+      let status = member.status || 'NONE';
+      
+      // 자신인 경우
+      if (member.id === currentUserId) {
+        status = 'SELF';
+      } 
+      // 이미 친구 목록에 있는 경우
+      else if (friendIds.includes(member.id)) {
+        status = 'FRIEND';
+      }
+      
+      return {
+        memberId: member.id,
+        nickname: member.nickname,
+        avatarUrl: member.avatarUrl,
+        level: member.level,
+        status: status
+      };
+    }) as FriendSearchResult[];
   } catch (error) {
     console.error("사용자 검색에 실패했습니다:", error);
     return [];
