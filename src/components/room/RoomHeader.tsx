@@ -1,15 +1,13 @@
 "use client";
 
 import React from 'react';
-import { ArrowLeft } from 'lucide-react';
 import { RoomResponse } from '../../types/room';
 
 interface RoomHeaderProps {
   room: RoomResponse | null;
-  onBack?: () => void;
 }
 
-const RoomHeader: React.FC<RoomHeaderProps> = ({ room, onBack }) => {
+const RoomHeader: React.FC<RoomHeaderProps> = ({ room }) => {
   // 난이도 한글 변환 함수
   const getDifficultyText = (difficulty?: string) => {
     switch (difficulty) {
@@ -47,9 +45,6 @@ const RoomHeader: React.FC<RoomHeaderProps> = ({ room, onBack }) => {
     return (
       <div className="p-4 border-b bg-white shadow-sm">
         <div className="flex items-center">
-          <button onClick={onBack} className="p-2 mr-2 rounded-full hover:bg-gray-100">
-            <ArrowLeft size={20} />
-          </button>
           <div className="flex-1">
             <div className="h-6 w-40 bg-gray-200 rounded animate-pulse mb-2"></div>
             <div className="h-4 w-60 bg-gray-200 rounded animate-pulse"></div>
@@ -62,9 +57,6 @@ const RoomHeader: React.FC<RoomHeaderProps> = ({ room, onBack }) => {
   return (
     <div className="p-4 border-b bg-white shadow-sm">
       <div className="flex items-center">
-        <button onClick={onBack} className="p-2 mr-2 rounded-full hover:bg-gray-100">
-          <ArrowLeft size={20} />
-        </button>
         <div className="flex-1">
           <div className="flex items-center">
             <h1 className="text-xl font-bold truncate mr-2">{room.title}</h1>
