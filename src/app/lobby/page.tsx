@@ -850,15 +850,35 @@ function LobbyContent({
 
   // 채팅 구독 설정
   useEffect(() => {
-    // 시스템 초기 메시지
-    setChatMessages([{
-      type: "SYSTEM",
-      content: "로비 채팅에 연결되었습니다. 안녕하세요! 👋",
-      senderId: "system",
-      senderName: "System",
-      timestamp: Date.now(),
-      roomId: "lobby"
-    }]);
+    // 로컬 스토리지에서 이전 채팅 메시지 불러오기
+    try {
+      const savedMessages = localStorage.getItem('lobby_chat_messages');
+      if (savedMessages) {
+        const parsedMessages = JSON.parse(savedMessages);
+        setChatMessages(parsedMessages);
+      } else {
+        // 저장된 메시지가 없는 경우 기본 시스템 메시지 설정
+        setChatMessages([{
+          type: "SYSTEM",
+          content: "로비 채팅에 연결되었습니다. 안녕하세요! 👋",
+          senderId: "system",
+          senderName: "System",
+          timestamp: Date.now(),
+          roomId: "lobby"
+        }]);
+      }
+    } catch (error) {
+      console.error('채팅 메시지 불러오기 실패:', error);
+      // 오류 발생 시 기본 시스템 메시지 설정
+      setChatMessages([{
+        type: "SYSTEM",
+        content: "로비 채팅에 연결되었습니다. 안녕하세요! 👋",
+        senderId: "system",
+        senderName: "System",
+        timestamp: Date.now(),
+        roomId: "lobby"
+      }]);
+    }
     
     // 로비 채팅 구독
     subscribe("/topic/lobby/chat", (message) => {
@@ -910,14 +930,23 @@ function LobbyContent({
                   };
                   
                   // 메시지 업데이트 - 아바타만 변경
-                  setChatMessages(prev => 
-                    prev.map(msg => 
+                  setChatMessages(prev => {
+                    const updatedMessages = prev.map(msg => 
                       msg.senderId === message.senderId && 
                       msg.timestamp === message.timestamp
                         ? { ...msg, avatarUrl: avatarUrl }
                         : msg
-                    )
-                  );
+                    );
+                    
+                    // 로컬 스토리지에 업데이트된 메시지 저장
+                    try {
+                      localStorage.setItem('lobby_chat_messages', JSON.stringify(updatedMessages));
+                    } catch (error) {
+                      console.error('채팅 메시지 저장 실패:', error);
+                    }
+                    
+                    return updatedMessages;
+                  });
                 }
               } catch (error) {
                 console.error(`사용자 ${senderId}의 프로필 정보를 가져오는데 실패했습니다:`, error);
@@ -933,10 +962,28 @@ function LobbyContent({
       }
       
       // 메시지에 아바타 URL 추가
-      setChatMessages((prevMessages) => [...prevMessages, {
-        ...message,
-        avatarUrl: avatarUrl || DEFAULT_AVATAR
-      }]);
+      setChatMessages((prevMessages) => {
+        // 새 메시지가 추가된 배열
+        const newMessages = [...prevMessages, {
+          ...message,
+          avatarUrl: avatarUrl || DEFAULT_AVATAR
+        }];
+        
+        // 메시지 최대 개수 제한 (너무 많은 메시지가 쌓이지 않도록)
+        const maxMessages = 100;
+        const trimmedMessages = newMessages.length > maxMessages 
+          ? newMessages.slice(newMessages.length - maxMessages) 
+          : newMessages;
+        
+        // 로컬 스토리지에 저장
+        try {
+          localStorage.setItem('lobby_chat_messages', JSON.stringify(trimmedMessages));
+        } catch (error) {
+          console.error('채팅 메시지 저장 실패:', error);
+        }
+        
+        return trimmedMessages;
+      });
     });
     
     return () => {
