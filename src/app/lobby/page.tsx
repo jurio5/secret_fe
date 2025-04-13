@@ -1130,52 +1130,93 @@ function LobbyContent({
     }
     
     // 방 삭제 메시지인 경우
-    if (message === "ROOM_DELETED" || message.startsWith && message.startsWith("ROOM_DELETED:")) {
+    if (message === "ROOM_DELETED" || 
+        (typeof message === 'string' && message.startsWith && message.startsWith("ROOM_DELETED:")) ||
+        message.type === "ROOM_DELETED") {
+      
       console.log("방 삭제 알림 수신:", message);
-      // 방 ID 추출 시도
-      const roomId = message.startsWith && message.startsWith("ROOM_DELETED:") 
-        ? message.split(":")[1] 
-        : null;
+      let roomId = null;
+      
+      // 메시지 형식에 따른 룸 ID 추출
+      if (typeof message === 'string' && message.startsWith && message.startsWith("ROOM_DELETED:")) {
+        roomId = message.split(":")[1];
+      } else if (message.roomId) {
+        roomId = message.roomId;
+      } else if (message.id) {
+        roomId = message.id;
+      }
       
       if (roomId) {
         // 특정 방 ID만 삭제
-        setRooms(prevRooms => prevRooms.filter(room => room.id !== parseInt(roomId)));
-        console.log(`방 ID ${roomId} 삭제됨`);
+        setRooms(prevRooms => {
+          const filtered = prevRooms.filter(room => room.id !== parseInt(roomId));
+          console.log(`방 ID ${roomId} 삭제됨, 남은 방 목록:`, filtered.length);
+          return filtered;
+        });
       } else {
         // 방 목록 새로고침
+        console.log("전체 방 목록 새로고침 (방 삭제)");
         loadRooms();
       }
       return;
     }
     
     // 방 업데이트 메시지인 경우 (방장 변경, 인원수 변경 등)
-    if (message === "ROOM_UPDATED" || message.startsWith && message.startsWith("ROOM_UPDATED:")) {
+    if (message === "ROOM_UPDATED" || 
+        (typeof message === 'string' && message.startsWith && message.startsWith("ROOM_UPDATED:")) ||
+        message.type === "ROOM_UPDATED") {
+      
       console.log("방 업데이트 알림 수신:", message);
-      // 방 ID 추출 시도
-      const roomId = message.startsWith && message.startsWith("ROOM_UPDATED:") 
-        ? message.split(":")[1] 
-        : null;
+      let roomId = null;
+      
+      // 메시지 형식에 따른 룸 ID 추출
+      if (typeof message === 'string' && message.startsWith && message.startsWith("ROOM_UPDATED:")) {
+        roomId = message.split(":")[1];
+      } else if (message.roomId) {
+        roomId = message.roomId;
+      } else if (message.id) {
+        roomId = message.id;
+      }
       
       if (roomId) {
-        // 특정 방 정보만 업데이트 위해 API 호출
+        // 개별 방 정보 업데이트
         try {
           fetch(`/api/v1/rooms/${roomId}`)
             .then(res => res.json())
             .then(data => {
               if (data && data.data) {
                 const updatedRoom = data.data;
-                setRooms(prevRooms => prevRooms.map(room => 
-                  room.id === parseInt(roomId) ? { ...room, ...updatedRoom } : room
-                ));
-                console.log(`방 ID ${roomId} 정보 업데이트됨`, updatedRoom);
+                setRooms(prevRooms => {
+                  // 기존 목록에 있는지 확인
+                  const roomExists = prevRooms.some(room => room.id === parseInt(roomId));
+                  
+                  if (roomExists) {
+                    // 기존 방 정보 업데이트
+                    const updated = prevRooms.map(room => 
+                      room.id === parseInt(roomId) ? { ...room, ...updatedRoom } : room
+                    );
+                    console.log(`방 ID ${roomId} 정보 업데이트됨:`, updatedRoom);
+                    return updated;
+                  } else {
+                    // 새 방 추가
+                    console.log(`새 방 정보 추가됨: ID ${roomId}`, updatedRoom);
+                    return [...prevRooms, updatedRoom];
+                  }
+                });
               }
             })
-            .catch(err => console.error("방 정보 업데이트 실패:", err));
+            .catch(err => {
+              console.error("방 정보 업데이트 실패:", err);
+              // 오류 발생 시 전체 목록 새로고침
+              loadRooms();
+            });
         } catch (error) {
           console.error("방 정보 업데이트 요청 실패:", error);
+          loadRooms();
         }
       } else {
         // 전체 방 목록 새로고침
+        console.log("전체 방 목록 새로고침 (방 업데이트)");
         loadRooms();
       }
       return;
@@ -1255,6 +1296,38 @@ function LobbyContent({
     localStorage.removeItem('intentional_navigation');
   }, []);
 
+  // 웹소켓 초기화 및 방 목록 자동 갱신을 위한 useEffect
+  useEffect(() => {
+    // 웹소켓 연결 및 방 목록 초기 로드
+    initializeWebSocket();
+    
+    // 15초마다 방 목록 자동 갱신 (백그라운드에서 갱신되도록)
+    const refreshInterval = setInterval(() => {
+      console.log("방 목록 자동 새로고침");
+      loadRooms();
+    }, 15000);
+    
+    // 컴포넌트 언마운트 시 정리
+    return () => {
+      // 웹소켓 연결 해제
+      try {
+        if (typeof window !== "undefined") {
+          // 모든 웹소켓 구독 해제
+          unsubscribe("/topic/lobby");
+          unsubscribe("/topic/lobby/chat");
+          unsubscribe("/topic/lobby/status");
+          unsubscribe("/topic/lobby/users");
+          console.log("로비 페이지 언마운트 - 웹소켓 연결 해제");
+        }
+      } catch (error) {
+        console.error("웹소켓 연결 해제 중 오류:", error);
+      }
+      
+      // 자동 갱신 타이머 해제
+      clearInterval(refreshInterval);
+    };
+  }, []);
+  
   // 사용자가 페이지를 나갈 때 메시지 캐시 클리어
   useEffect(() => {
     // 다른 페이지로 이동할 때 메시지 캐시를 클리어
