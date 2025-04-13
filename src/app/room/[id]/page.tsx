@@ -333,7 +333,7 @@ export default function RoomPage() {
       const response = await (client.POST as any)(`/api/v1/rooms/${roomId}/join`, {});
       console.log("방 입장 API 응답:", response);
       
-      // 임시 플레이어 정보 생성
+      // 임시 플레이어 정보 생성 (플레이어 배열에 현재 사용자 추가)
       const isCurrentUserOwner = room && currentUser.id === room.ownerId;
       const newPlayer = {
         id: currentUser.id.toString(),
@@ -344,27 +344,17 @@ export default function RoomPage() {
         avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR
       };
       
-      // 플레이어 목록 업데이트 후 상태 브로드캐스트
-      if (!players.some(p => p.id === currentUser.id.toString())) {
-        setPlayers(prevPlayers => [...prevPlayers, newPlayer]);
-      }
-      
       // 입장 성공 시 메시지를 방에 전송
       publish(`/app/room/${roomId}/join`, {
         roomId: parseInt(roomId)
       });
       
-      // 상태 브로드캐스트 (즉시 실행)
-      if (room) {
-        publish(`/app/room/${roomId}/status`, {
-          room: {
-            ...room,
-            currentPlayers: room.currentPlayers ? room.currentPlayers + 1 : 1
-          },
-          players: [...players, newPlayer],
-          timestamp: Date.now()
-        });
-      }
+      // 방 입장 시스템 메시지
+      publish(`/app/room/chat/${roomId}`, {
+        type: "SYSTEM",
+        content: `${currentUser.nickname}님이 입장했습니다.`,
+        timestamp: Date.now()
+      });
       
       // 로비에 사용자 상태 업데이트 전송
       publish(`/app/lobby/status`, {
@@ -375,12 +365,33 @@ export default function RoomPage() {
         timestamp: Date.now()
       });
       
-      // 방 입장 시스템 메시지
-      publish(`/app/room/chat/${roomId}`, {
-        type: "SYSTEM",
-        content: `${currentUser.nickname}님이 입장했습니다.`,
-        timestamp: Date.now()
-      });
+      // 플레이어 목록 업데이트 후 상태 브로드캐스트
+      if (!players.some(p => p.id === currentUser.id.toString())) {
+        // setState 콜백을 사용하여 상태 업데이트 후 브로드캐스트
+        setPlayers(prevPlayers => {
+          const updatedPlayers = [...prevPlayers, newPlayer];
+          
+          // 상태가 업데이트된 후 즉시 브로드캐스트
+          setTimeout(() => {
+            if (room) {
+              publish(`/app/room/${roomId}/status`, {
+                room: {
+                  ...room,
+                  currentPlayers: updatedPlayers.length
+                },
+                players: updatedPlayers,
+                timestamp: Date.now()
+              });
+              console.log("방 입장 후 업데이트된 플레이어 목록 브로드캐스트:", updatedPlayers);
+            }
+          }, 0);
+          
+          return updatedPlayers;
+        });
+      } else {
+        // 이미 목록에 있는 경우 현재 상태로 브로드캐스트
+        setTimeout(() => broadcastRoomStatus(), 0);
+      }
       
       // 서버 데이터와 클라이언트 상태를 동기화하기 위해 방 정보 업데이트
       if (room) {
@@ -393,7 +404,7 @@ export default function RoomPage() {
       console.log("방에 입장했습니다. 최종 플레이어 목록:", players);
       
       // 추가 브로드캐스트 (일정 시간 후 한번 더 실행하여 안정성 확보)
-      setTimeout(() => broadcastRoomStatus(), 500);
+      setTimeout(() => broadcastRoomStatus(), 1000);
     } catch (error) {
       console.error("방 입장에 실패했습니다:", error);
     }
@@ -438,7 +449,7 @@ export default function RoomPage() {
   const toggleReady = async () => {
     try {
       // 이미 게임이 시작된 경우 또는 방이 대기 상태가 아닌 경우 처리하지 않음
-      if (room?.status !== 'WAITING') {
+      if (room?.status !== 'WAITING' || !currentUser) {
         console.log("게임이 이미 시작되었거나 방이 대기 상태가 아닙니다.");
         return;
       }
@@ -454,16 +465,38 @@ export default function RoomPage() {
       // 메시지 발행 - 방 내 플레이어에게 알림
       publish(`/app/room/chat/${roomId}`, {
         type: "SYSTEM",
-        content: `${currentUser?.nickname || '플레이어'}님이 ${newReadyState ? '준비 완료' : '준비 취소'}하였습니다.`,
+        content: `${currentUser.nickname || '플레이어'}님이 ${newReadyState ? '준비 완료' : '준비 취소'}하였습니다.`,
         timestamp: Date.now()
       });
       
-      // 로컬 상태 업데이트
+      // 로컬 상태 업데이트 및 브로드캐스트
       setIsReady(newReadyState);
-      console.log(`준비 상태가 ${newReadyState ? '완료' : '취소'}되었습니다.`);
       
-      // 준비 상태 변경 후 다른 사용자들에게 브로드캐스트
-      setTimeout(() => broadcastRoomStatus(), 500);
+      // 플레이어 목록에서 현재 사용자 상태 업데이트
+      setPlayers(prevPlayers => {
+        const updatedPlayers = prevPlayers.map(player => {
+          if (player.id === currentUser.id.toString()) {
+            return { ...player, isReady: newReadyState };
+          }
+          return player;
+        });
+        
+        // 상태가 업데이트된 후 즉시 브로드캐스트
+        setTimeout(() => {
+          if (room) {
+            publish(`/app/room/${roomId}/status`, {
+              room: room,
+              players: updatedPlayers,
+              timestamp: Date.now()
+            });
+            console.log("준비 상태 변경 후 업데이트된 플레이어 목록 브로드캐스트:", updatedPlayers);
+          }
+        }, 0);
+        
+        return updatedPlayers;
+      });
+      
+      console.log(`준비 상태가 ${newReadyState ? '완료' : '취소'}되었습니다.`);
     } catch (error) {
       console.error("준비 상태 변경에 실패했습니다:", error);
       alert("준비 상태 변경에 실패했습니다. 다시 시도해주세요.");
@@ -474,18 +507,18 @@ export default function RoomPage() {
   const startGame = async () => {
     try {
       // 방장인지 확인
-      if (!isOwner) {
+      if (!isOwner || !currentUser || !room) {
         console.error("방장만 게임을 시작할 수 있습니다.");
         return;
       }
       
       // 게임이 이미 시작된 상태인지 확인
-      if (room?.status !== 'WAITING') {
+      if (room.status !== 'WAITING') {
         console.log("게임이 이미 시작되었습니다.");
         return;
       }
       
-      // API 호출 - 게임 시작 (as any 타입 캐스팅 사용)
+      // API 호출 - 게임 시작
       await (client.PATCH as any)(`/api/v1/rooms/${roomId}/start`, {});
       
       // 알림 메시지
@@ -495,10 +528,30 @@ export default function RoomPage() {
         timestamp: Date.now()
       });
       
-      console.log("게임이 시작되었습니다.");
+      // 상태 업데이트 후 브로드캐스트
+      setRoom(prevRoom => {
+        if (!prevRoom) return prevRoom;
+        
+        // 타입이 맞는 방식으로 업데이트
+        const updatedRoom: RoomResponse = {
+          ...prevRoom,
+          status: 'IN_GAME' as "WAITING" | "IN_GAME" | "FINISHED" 
+        };
+        
+        // 상태가 업데이트된 후 즉시 브로드캐스트
+        setTimeout(() => {
+          publish(`/app/room/${roomId}/status`, {
+            room: updatedRoom,
+            players: players,
+            timestamp: Date.now()
+          });
+          console.log("게임 시작 후 업데이트된 방 상태 브로드캐스트:", updatedRoom);
+        }, 0);
+        
+        return updatedRoom;
+      });
       
-      // 게임 시작 후 방 상태를 브로드캐스트
-      setTimeout(() => broadcastRoomStatus(), 500);
+      console.log("게임이 시작되었습니다.");
     } catch (error) {
       console.error("게임 시작에 실패했습니다:", error);
       alert("게임 시작에 실패했습니다. 다시 시도해주세요.");
@@ -508,65 +561,79 @@ export default function RoomPage() {
   // 방 퇴장
   const leaveRoom = async () => {
     try {
-      // 퇴장 시 자신을 제외한 플레이어 목록으로 상태 브로드캐스트
-      const updatedPlayers = players.filter((player: {id: string}) => 
-        player.id !== currentUser?.id.toString()
-      );
+      if(!currentUser || !room) return;
       
-      // 퇴장 상태 브로드캐스트를 리다이렉트 전에 수행
-      if (room && currentUser) {
-        publish(`/app/room/${roomId}/status`, {
-          room: {
-            ...room,
-            currentPlayers: Math.max(0, (room.currentPlayers || 1) - 1)
-          },
-          players: updatedPlayers,
-          timestamp: Date.now()
-        });
-      }
+      // 퇴장 시스템 메시지 먼저 전송
+      publish(`/app/room/chat/${roomId}`, {
+        type: "SYSTEM",
+        content: `${currentUser.nickname}님이 퇴장했습니다.`,
+        timestamp: Date.now()
+      });
       
-      // 퇴장 시스템 메시지
-      if (currentUser) {
-        publish(`/app/room/chat/${roomId}`, {
-          type: "SYSTEM",
-          content: `${currentUser.nickname}님이 퇴장했습니다.`,
-          timestamp: Date.now()
-        });
-      }
+      // 퇴장 메시지 전송
+      publish(`/app/room/${roomId}/leave`, {
+        roomId: parseInt(roomId)
+      });
       
-      // 잠시 대기 후 API 호출 및 리다이렉트 (브로드캐스트 메시지가 전송될 시간 확보)
+      // 플레이어 목록에서 현재 사용자 제거 후 브로드캐스트
+      setPlayers(prevPlayers => {
+        const updatedPlayers = prevPlayers.filter(player => 
+          player.id !== currentUser.id.toString()
+        );
+        
+        // 상태가 업데이트된 후 즉시 브로드캐스트
+        setTimeout(() => {
+          if (room) {
+            publish(`/app/room/${roomId}/status`, {
+              room: {
+                ...room,
+                currentPlayers: Math.max(0, updatedPlayers.length)
+              },
+              players: updatedPlayers,
+              timestamp: Date.now()
+            });
+            console.log("방 퇴장 후 업데이트된 플레이어 목록 브로드캐스트:", updatedPlayers);
+          }
+        }, 0);
+        
+        return updatedPlayers;
+      });
+      
+      // 로비에 사용자 상태 업데이트 전송
+      publish(`/app/lobby/status`, {
+        type: "STATUS_UPDATE",
+        status: "로비",
+        location: "IN_LOBBY",
+        roomId: null,
+        timestamp: Date.now()
+      });
+      
+      // 웹소켓 구독 해제
+      unsubscribe(`/topic/room/${roomId}`);
+      unsubscribe(`/topic/room/chat/${roomId}`);
+      unsubscribe(`/topic/room/${roomId}/status`);
+      unsubscribe("/topic/lobby/users");
+      unsubscribe("/topic/lobby/status");
+      
+      // beforeunload 경고 없이 로비로 이동하기 위해 로컬 스토리지에 플래그 설정
+      localStorage.setItem('intentional_navigation', 'true');
+      
+      // API 호출 및 리다이렉트 (브로드캐스트 메시지가 전송될 시간 확보)
       setTimeout(async () => {
-        await (client.POST as any)(`/api/v1/rooms/${roomId}/leave`, {});
-        
-        // 퇴장 메시지 전송
-        publish(`/app/room/${roomId}/leave`, {
-          roomId: parseInt(roomId)
-        });
-        
-        // 로비에 사용자 상태 업데이트 전송
-        publish(`/app/lobby/status`, {
-          type: "STATUS_UPDATE",
-          status: "로비",
-          location: "IN_LOBBY",
-          roomId: null,
-          timestamp: Date.now()
-        });
-        
-        // 웹소켓 구독 해제
-        unsubscribe(`/topic/room/${roomId}`);
-        unsubscribe(`/topic/room/chat/${roomId}`);
-        unsubscribe(`/topic/room/${roomId}/status`);
-        unsubscribe("/topic/lobby/users");
-        unsubscribe("/topic/lobby/status");
-        
-        // beforeunload 경고 없이 로비로 이동하기 위해 로컬 스토리지에 플래그 설정
-        localStorage.setItem('intentional_navigation', 'true');
-        
-        // 로비로 리다이렉트
-        window.location.href = "/lobby";
-      }, 300);
+        try {
+          await (client.POST as any)(`/api/v1/rooms/${roomId}/leave`, {});
+          // 로비로 리다이렉트
+          window.location.href = "/lobby";
+        } catch (error) {
+          console.error("API 호출 중 오류 발생:", error);
+          // 오류가 발생해도 로비로 이동
+          window.location.href = "/lobby";
+        }
+      }, 500);
     } catch (error) {
       console.error("방 퇴장에 실패했습니다:", error);
+      // 오류가 발생해도 로비로 이동 시도
+      window.location.href = "/lobby";
     }
   };
 
@@ -598,6 +665,14 @@ export default function RoomPage() {
         // 모든 데이터가 로드된 후 방 입장
         await joinRoom();
         console.log("방 입장 프로세스 완료");
+        
+        // 일정 시간 후 추가 브로드캐스트로 안정성 확보
+        setTimeout(() => {
+          if (currentUser && room && players.length > 0) {
+            broadcastRoomStatus();
+            console.log("방 입장 후 추가 브로드캐스트 완료");
+          }
+        }, 2000);
       } catch (error) {
         console.error("방 데이터 로드 또는 입장 중 오류:", error);
       }
@@ -610,6 +685,7 @@ export default function RoomPage() {
       console.log("컴포넌트 언마운트 - 웹소켓 구독 해제");
       unsubscribe(`/topic/room/${roomId}`);
       unsubscribe(`/topic/room/chat/${roomId}`);
+      unsubscribe(`/topic/room/${roomId}/status`);
       unsubscribe("/topic/lobby/users");
       unsubscribe("/topic/lobby/status");
     };
