@@ -416,13 +416,15 @@ function RoomContent() {
       console.log("입장 이벤트 수신:", message);
       // 상태 요청 발행 (새로운 플레이어 정보 가져오기)
       setTimeout(() => {
-        publish(`/app/room/status/${roomId}`, {
-          type: "ROOM_UPDATED",
+        publish(`/app/room/${roomId}`, {
+          type: "JOIN",
           roomId: parseInt(roomId),
-          senderId: currentUser?.id.toString() || "system",
-          senderName: currentUser?.nickname || "System",
-          content: "입장 이벤트 수신 후 상태 업데이트 요청",
-          data: JSON.stringify({ requestType: "STATUS_UPDATE", event: "JOIN" }),
+          playerId: currentUser?.id,
+          playerNickname: currentUser?.nickname,
+          senderId: currentUser?.id.toString(),
+          senderName: currentUser?.nickname,
+          content: `${currentUser?.nickname}님이 입장했습니다.`,
+          data: JSON.stringify({ playerInfo: { id: currentUser?.id, nickname: currentUser?.nickname } }),
           timestamp: Date.now()
         });
       }, 100);
@@ -432,13 +434,15 @@ function RoomContent() {
       console.log("퇴장 이벤트 수신:", message);
       // 상태 요청 발행 (플레이어 목록 업데이트)
       setTimeout(() => {
-        publish(`/app/room/status/${roomId}`, {
-          type: "ROOM_UPDATED",
+        publish(`/app/room/${roomId}`, {
+          type: "LEAVE",
           roomId: parseInt(roomId),
-          senderId: currentUser?.id.toString() || "system",
-          senderName: currentUser?.nickname || "System",
-          content: "퇴장 이벤트 수신 후 상태 업데이트 요청",
-          data: JSON.stringify({ requestType: "STATUS_UPDATE", event: "LEAVE" }),
+          playerId: currentUser?.id,
+          playerNickname: currentUser?.nickname,
+          senderId: currentUser?.id.toString(),
+          senderName: currentUser?.nickname,
+          content: `${currentUser?.nickname}님이 퇴장했습니다.`,
+          data: JSON.stringify({ playerInfo: { id: currentUser?.id, nickname: currentUser?.nickname } }),
           timestamp: Date.now()
         });
       }, 100);
@@ -502,10 +506,15 @@ function RoomContent() {
       });
       
       // 입장 이벤트 발행
-      publish(`/app/room/join/${roomId}`, {
+      publish(`/app/room/${roomId}`, {
+        type: "JOIN",
         roomId: parseInt(roomId),
         playerId: currentUser.id,
         playerNickname: currentUser.nickname,
+        senderId: currentUser.id.toString(),
+        senderName: currentUser.nickname,
+        content: `${currentUser.nickname}님이 입장했습니다.`,
+        data: JSON.stringify({ playerInfo: { id: currentUser.id, nickname: currentUser.nickname } }),
         timestamp: Date.now()
       });
       
@@ -573,10 +582,15 @@ function RoomContent() {
       });
       
       // 퇴장 이벤트 발행
-      publish(`/app/room/leave/${roomId}`, {
+      publish(`/app/room/${roomId}`, {
+        type: "LEAVE",
         roomId: parseInt(roomId),
         playerId: currentUser.id,
         playerNickname: currentUser.nickname,
+        senderId: currentUser.id.toString(),
+        senderName: currentUser.nickname,
+        content: `${currentUser.nickname}님이 퇴장했습니다.`,
+        data: JSON.stringify({ playerInfo: { id: currentUser.id, nickname: currentUser.nickname } }),
         timestamp: Date.now()
       });
       
@@ -677,11 +691,21 @@ function RoomContent() {
           isReady: newReadyState
         });
         
-        // 준비 상태 변경 이벤트 발행 - /app/room/ready/{roomId} 엔드포인트 사용
-        publish(`/app/room/ready/${roomId}`, {
+        // 준비 상태 변경 이벤트 발행 - 백엔드에서 지원하는 엔드포인트 사용
+        publish(`/app/room/${roomId}`, {
+          type: newReadyState ? "READY" : "UNREADY",
           roomId: parseInt(roomId),
           playerId: currentUser.id,
-          isReady: newReadyState,
+          senderId: currentUser.id.toString(),
+          senderName: currentUser.nickname,
+          content: `${currentUser.nickname}님이 ${newReadyState ? '준비 완료' : '준비 취소'}하였습니다.`,
+          data: JSON.stringify({ 
+            playerInfo: { 
+              id: currentUser.id, 
+              nickname: currentUser.nickname,
+              isReady: newReadyState
+            } 
+          }),
           timestamp: Date.now()
         });
         
@@ -759,8 +783,16 @@ function RoomContent() {
       });
       
       // 게임 상태 업데이트
-      publish(`/app/room/${roomId}/status`, {
-        room: { ...room, status: 'IN_GAME' },
+      publish(`/app/room/${roomId}`, {
+        type: "GAME_START",
+        roomId: parseInt(roomId),
+        senderId: currentUser?.id.toString() || "system",
+        senderName: currentUser?.nickname || "System",
+        content: "게임이 시작되었습니다!",
+        data: JSON.stringify({ 
+          roomStatus: 'IN_GAME',
+          room: { ...room, status: 'IN_GAME' }
+        }),
         timestamp: Date.now()
       });
     } catch (error) {
@@ -808,13 +840,16 @@ function RoomContent() {
         console.log("방 상태 주기적 요청");
         
         // 방 상태 요청 (WebSocket)
-        publish(`/app/room/status/${roomId}`, {
+        publish(`/app/room/${roomId}`, {
           type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
-          senderId: currentUser?.id.toString() || "system",
-          senderName: currentUser?.nickname || "System",
-          content: "상태 업데이트 요청",
-          data: JSON.stringify({ requestType: "STATUS_UPDATE" }),
+          senderId: currentUser.id.toString(),
+          senderName: currentUser.nickname,
+          content: "주기적 상태 업데이트 요청",
+          data: JSON.stringify({ 
+            requestType: "STATUS_UPDATE",
+            timestamp: Date.now()
+          }),
           timestamp: Date.now()
         });
         
