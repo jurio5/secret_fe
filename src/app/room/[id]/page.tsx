@@ -523,8 +523,12 @@ function RoomContent() {
       // 방 상태 정보 요청 (플레이어 목록 포함)
       setTimeout(() => {
         publish(`/app/room/status/${roomId}`, {
-          type: "STATUS_REQUEST",
+          type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
+          senderId: currentUser?.id.toString() || "system",
+          senderName: currentUser?.nickname || "System",
+          content: "상태 업데이트 요청",
+          data: JSON.stringify({ requestType: "STATUS_UPDATE" }),
           timestamp: Date.now()
         });
       }, 500);
@@ -676,8 +680,12 @@ function RoomContent() {
         // 방 상태 업데이트 요청 - 모든 클라이언트에 상태 갱신 트리거
         setTimeout(() => {
           publish(`/app/room/status/${roomId}`, {
-            type: "STATUS_REQUEST",
+            type: "ROOM_UPDATED",
             roomId: parseInt(roomId),
+            senderId: currentUser?.id.toString() || "system",
+            senderName: currentUser?.nickname || "System",
+            content: "상태 업데이트 요청",
+            data: JSON.stringify({ requestType: "STATUS_UPDATE" }),
             timestamp: Date.now()
           });
         }, 200);
@@ -793,8 +801,12 @@ function RoomContent() {
         
         // 방 상태 요청 (WebSocket)
         publish(`/app/room/status/${roomId}`, {
-          type: "STATUS_REQUEST",
+          type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
+          senderId: currentUser?.id.toString() || "system",
+          senderName: currentUser?.nickname || "System",
+          content: "상태 업데이트 요청",
+          data: JSON.stringify({ requestType: "STATUS_UPDATE" }),
           timestamp: Date.now()
         });
         
@@ -852,8 +864,12 @@ function RoomContent() {
         console.log("경고: 내가 플레이어 목록에 없음, 상태 요청");
         // 상태 요청 발행
         publish(`/app/room/status/${roomId}`, {
-          type: "STATUS_REQUEST",
+          type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
+          senderId: currentUser?.id.toString() || "system",
+          senderName: currentUser?.nickname || "System",
+          content: "상태 업데이트 요청",
+          data: JSON.stringify({ requestType: "STATUS_UPDATE" }),
           timestamp: Date.now()
         });
       }
