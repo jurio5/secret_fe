@@ -832,7 +832,7 @@ export default function RoomPage() {
       const newReadyState = !isReady;
       
       // API 호출 - 준비 상태 변경 (as any 타입 캐스팅 사용)
-      await (client.PATCH as any)(`/api/v1/${roomId}/ready`, {
+      await (client.PATCH as any)(`/api/v1/rooms/${roomId}/ready`, {
         body: { isReady: newReadyState }
       });
       
