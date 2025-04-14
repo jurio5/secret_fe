@@ -1585,8 +1585,7 @@ function LobbyContent({
                           setJoinRoomError("");
                         } else {
                           // 공개 방인 경우 바로 입장
-                          localStorage.setItem('intentional_navigation', 'true');
-                          window.location.href = `/room/${String(room.id)}`;
+                          handleJoinRoom(String(room.id));
                         }
                       } else {
                         alert("잘못된 방 정보입니다.");
@@ -1734,8 +1733,7 @@ function LobbyContent({
                             onClick={(e) => {
                               e.stopPropagation();
                               // 방 입장 시 의도적 네비게이션 플래그 설정
-                              localStorage.setItem('intentional_navigation', 'true');
-                              window.location.href = `/room/${String(user.roomId)}`;
+                              handleJoinRoom(String(user.roomId));
                             }}
                           >
                             입장
