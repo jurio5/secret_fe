@@ -331,6 +331,38 @@ function RoomContent() {
         // 디버깅을 위한 상세 로그
         console.log("파싱된 상태 데이터:", status);
         
+        // requestType이 STATUS_UPDATE이고 플레이어 정보가 없는 경우
+        if (status.requestType === "STATUS_UPDATE" && !status.players) {
+          console.log("상태 업데이트 메시지에 플레이어 정보가 없음, fetchRoomData 호출");
+          fetchRoomData().then(roomData => {
+            if (roomData && roomData.players) {
+              console.log("API로 가져온 플레이어 정보:", roomData.players);
+              // 플레이어 정보가 있으면 상태 업데이트
+              const formattedPlayers = roomData.players.map((player: any) => {
+                const id = String(player.id || '');
+                const nickname = player.nickname || player.name || '알 수 없음';
+                const avatarUrl = player.avatarUrl || DEFAULT_AVATAR;
+                const isPlayerOwner = room ? String(room.ownerId) === id : false;
+                const isPlayerReady = Boolean(player.isReady);
+                
+                return {
+                  id,
+                  nickname,
+                  avatarUrl,
+                  isOwner: isPlayerOwner,
+                  isReady: isPlayerReady
+                };
+              });
+              
+              if (JSON.stringify(formattedPlayers) !== JSON.stringify(players)) {
+                console.log("API로 가져온 플레이어 목록으로 상태 업데이트");
+                setPlayers([...formattedPlayers]);
+              }
+            }
+          });
+          return;
+        }
+        
         // 방 정보 업데이트
         if (status.room) {
           console.log("방 정보 업데이트:", status.room);
