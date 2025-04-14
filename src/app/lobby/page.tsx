@@ -1381,8 +1381,8 @@ function LobbyContent({
     setIsJoiningRoom(true);
     
     try {
-      // API 엔드포인트 설정
-      const endpoint = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/rooms/${roomId}/join`;
+      // API 엔드포인트 설정 - 상대 경로 사용
+      const endpoint = `/api/v1/rooms/${roomId}/join`;
       
       // 방 종류에 따라 다른 요청 보내기
       if (password) {
