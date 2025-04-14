@@ -92,7 +92,7 @@ const parseJavaObjectString = (text: string): any => {
     
     return result;
   } catch (error) {
-    console.error("Java 객체 문자열 파싱 실패:", error);
+    //console.error("Java 객체 문자열 파싱 실패:", error);
     return null;
   }
 };
@@ -101,13 +101,13 @@ let stompClient = new Client({
   webSocketFactory: () => socket,
   connectHeaders: {},
   debug: (str) => {
-    console.log("[STOMP]", str);
+    //console.log("[STOMP]", str);
   },
   reconnectDelay: 5000,
   heartbeatIncoming: 25000,
   heartbeatOutgoing: 25000,
   onConnect: () => {
-    console.log("✅ WebSocket 연결 성공");
+    //console.log("✅ WebSocket 연결 성공");
     stompClientConnected = true;
 
     // 연결 성공 시 대기 중인 구독 처리
@@ -123,8 +123,8 @@ let stompClient = new Client({
     }
   },
   onStompError: (frame) => {
-    console.error("❌ STOMP 오류:", frame.headers["message"]);
-    console.error("상세 내용:", frame.body);
+    //console.error("❌ STOMP 오류:", frame.headers["message"]);
+    //console.error("상세 내용:", frame.body);
   },
 });
 
@@ -133,29 +133,29 @@ const performSubscribe = (
   destination: string,
   callback: (message: any) => void
 ) => {
-  console.log(`구독 시작: ${destination}`);
+  //console.log(`구독 시작: ${destination}`);
   
   const subscription = stompClient.subscribe(destination, (message) => {
-    console.log(`메시지 수신 (${destination}):`, message.body);
+    //console.log(`메시지 수신 (${destination}):`, message.body);
     
     // 채팅 메시지 전용 처리 추가
     if (destination.includes('/chat/')) {
-      console.log(`채팅 메시지 수신 감지 (${destination})`);
+      //console.log(`채팅 메시지 수신 감지 (${destination})`);
     }
     
     try {
       // JSON 파싱 시도
       const parsedMessage = JSON.parse(message.body);
-      console.log("JSON 파싱 성공:", parsedMessage);
+      //console.log("JSON 파싱 성공:", parsedMessage);
       callback(parsedMessage);
     } catch (error) {
-      console.log("JSON 파싱 실패, 다른 방식으로 시도:", error);
+      //console.log("JSON 파싱 실패, 다른 방식으로 시도:", error);
       
       // JSON 파싱 실패 시 Java 객체 문자열 파싱 시도
       if (message.body.includes("WebSocketChatMessageResponse[")) {
         const javaObject = parseJavaObjectString(message.body);
         if (javaObject) {
-          console.debug("Java 객체 문자열 파싱 성공:", javaObject);
+          //console.debug("Java 객체 문자열 파싱 성공:", javaObject);
           callback(javaObject);
           return;
         }
@@ -164,7 +164,7 @@ const performSubscribe = (
       // ROOM_CREATED 특수 메시지 처리
       if (destination === "/topic/lobby" && message.body.startsWith("ROOM_CREATED:")) {
         const roomId = message.body.split(":")[1];
-        console.debug("방 생성 메시지 감지:", roomId);
+        //console.debug("방 생성 메시지 감지:", roomId);
         callback({
           type: "ROOM_CREATED",
           roomId: parseInt(roomId),
@@ -175,12 +175,12 @@ const performSubscribe = (
       
       // 채팅 메시지 특수 처리
       if (destination.includes('/chat')) {
-        console.log(`채팅 메시지 처리 시도 (${destination}):`, message.body);
+        //console.log(`채팅 메시지 처리 시도 (${destination}):`, message.body);
         
         try {
           // 문자열이 아닌 경우 처리
           if (typeof message.body !== 'string') {
-            console.log("채팅 메시지가 문자열이 아님. 직접 전달:", message.body);
+            //console.log("채팅 메시지가 문자열이 아님. 직접 전달:", message.body);
             callback(message.body);
             return;
           }
@@ -190,16 +190,16 @@ const performSubscribe = (
           if (bracketMatch) {
             try {
               const jsonContent = JSON.parse(bracketMatch[0]);
-              console.log("중괄호에서 JSON 추출 성공:", jsonContent);
+              //console.log("중괄호에서 JSON 추출 성공:", jsonContent);
               callback(jsonContent);
               return;
             } catch (e) {
-              console.log("중괄호 내용 파싱 실패:", e);
+              //console.log("중괄호 내용 파싱 실패:", e);
             }
           }
           
           // 채팅 메시지용 기본 객체 생성
-          console.log("기본 채팅 메시지 객체 생성");
+          //console.log("기본 채팅 메시지 객체 생성");
           const roomId = destination.includes('/chat/') 
             ? destination.split('/chat/')[1] 
             : destination.split('/').pop() || "unknown";
@@ -213,7 +213,7 @@ const performSubscribe = (
             roomId: roomId
           });
         } catch (chatError) {
-          console.error("채팅 메시지 처리 중 오류:", chatError);
+          //console.error("채팅 메시지 처리 중 오류:", chatError);
           callback({
             type: "SYSTEM",
             content: "메시지 처리 중 오류가 발생했습니다.",
@@ -224,13 +224,13 @@ const performSubscribe = (
         }
       } else {
         // 기타 메시지는 원본 반환
-        console.log("기타 메시지 원본 반환:", message.body);
+        //console.log("기타 메시지 원본 반환:", message.body);
         callback(message.body);
       }
     }
   });
   
-  console.log(`구독 완료: ${destination}`);
+  //console.log(`구독 완료: ${destination}`);
   activeSubscriptions[destination] = subscription;
 };
 
@@ -275,7 +275,7 @@ const publish = (destination: string, body: any) => {
 // 웹소켓 연결을 완전히 재설정하는 함수
 const reconnectWebSocket = () => {
   try {
-    console.log("웹소켓 연결 재설정 시작");
+    //console.log("웹소켓 연결 재설정 시작");
     
     // 모든 구독 해제
     Object.keys(activeSubscriptions).forEach(destination => {
@@ -302,13 +302,13 @@ const reconnectWebSocket = () => {
       webSocketFactory: () => newSocket,
       connectHeaders: {},
       debug: (str) => {
-        console.log("[STOMP]", str);
+        //console.log("[STOMP]", str);
       },
       reconnectDelay: 5000,
       heartbeatIncoming: 25000,
       heartbeatOutgoing: 25000,
       onConnect: () => {
-        console.log("✅ 웹소켓 재연결 성공");
+        //console.log("✅ 웹소켓 재연결 성공");
         stompClientConnected = true;
         
         // 연결 성공 시 대기 중인 구독 처리
@@ -329,7 +329,7 @@ const reconnectWebSocket = () => {
     
     return true;
   } catch (error) {
-    console.error("웹소켓 재연결 실패:", error);
+    //console.error("웹소켓 재연결 실패:", error);
     return false;
   }
 };

@@ -1393,7 +1393,6 @@ function LobbyContent({
           params: { path: { roomId: parseInt(roomId) } }
         });
       }
-      
       // 방 입장 성공
       localStorage.setItem('intentional_navigation', 'true');
       window.location.href = `/room/${roomId}`;
@@ -1570,6 +1569,7 @@ function LobbyContent({
                     key={room.id} 
                     className="bg-gray-800 border border-gray-700 rounded-xl p-4 hover:border-blue-500 transition-colors cursor-pointer shadow-md"
                     onClick={() => {
+                      console.log(room)
                       if (room.id) {
                         if (room.isPrivate) {
                           // 비공개 방인 경우 비밀번호 입력 모달 표시
