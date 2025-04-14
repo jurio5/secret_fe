@@ -1381,22 +1381,16 @@ function LobbyContent({
     setIsJoiningRoom(true);
     
     try {
-      // API 엔드포인트 설정 - 상대 경로 사용
-      const endpoint = `/api/v1/rooms/${roomId}/join`;
-      
-      // 방 종류에 따라 다른 요청 보내기
       if (password) {
         // 비공개 방인 경우
-        await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ password }),
+        await client.POST(`/api/v1/rooms/{roomId}/join`, {
+          params: { path: { roomId: parseInt(roomId) } },
+          body: { password } as any
         });
       } else {
-        await fetch(endpoint, {
-          method: 'POST',
+        // 공개 방인 경우
+        await client.POST(`/api/v1/rooms/{roomId}/join`, {
+          params: { path: { roomId: parseInt(roomId) } }
         });
       }
       
