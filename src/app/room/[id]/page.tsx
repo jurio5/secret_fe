@@ -90,6 +90,7 @@ export default function RoomPage() {
   const [isReady, setIsReady] = useState<boolean>(false);
   const [gameStatus, setGameStatus] = useState<string>('WAITING');
   const [activeTab, setActiveTab] = useState<'players' | 'chat'>('players');
+  const [subscribers, setSubscribers] = useState<string[]>([]);
   
   // 플레이어 목록 초기화 여부 추적
   const playersInitialized = useRef<boolean>(false);
@@ -891,11 +892,14 @@ export default function RoomPage() {
   // 게임 시작
   const startGame = async () => {
     try {
-      // 방장인지 확인
+      // 방장인지 확인 및 room이 null이 아닌지 확인
       if (!isOwner || !currentUser || !room) {
-        console.error("방장만 게임을 시작할 수 있습니다.");
+        console.error("방장만 게임을 시작할 수 있거나 방 정보가 없습니다.");
         return;
       }
+      
+      // 게임 시작 로딩 상태 표시
+      setGameStatus('STARTING');
       
       // 게임이 이미 시작된 상태인지 확인
       if (room.status !== 'WAITING') {
@@ -903,46 +907,103 @@ export default function RoomPage() {
         return;
       }
       
-      // API 호출 - 게임 시작
-      await (client.POST as any)(`/api/v1/rooms/${roomId}/start`, {});
-      
-      // 알림 메시지
+      // 문제 생성 중임을 알리는 시스템 메시지
       publish(`/app/room/chat/${roomId}`, {
         type: "SYSTEM",
-        content: "게임이 시작되었습니다!",
+        content: "AI가 문제를 생성하는 중입니다. 잠시만 기다려주세요...",
         timestamp: Date.now()
       });
       
-      // 게임 상태 업데이트
-      setGameStatus('IN_GAME');
-      
-      // 상태 업데이트 후 브로드캐스트
-      setRoom(prevRoom => {
-        if (!prevRoom) return prevRoom;
-        
-        // 타입이 맞는 방식으로 업데이트
-        const updatedRoom: RoomResponse = {
-          ...prevRoom,
-          status: 'IN_GAME' as "WAITING" | "IN_GAME" | "FINISHED" 
-        };
-        
-        // 상태가 업데이트된 후 즉시 브로드캐스트
-        setTimeout(() => {
-          publish(`/app/room/${roomId}/status`, {
-            room: updatedRoom,
-            players: players,
-            gameStatus: 'IN_GAME',
-            timestamp: Date.now()
-          });
-          console.log("게임 시작 후 업데이트된 방 상태 브로드캐스트:", updatedRoom);
-        }, 0);
-        
-        return updatedRoom;
+      // WebSocket을 통해 AI 퀴즈 생성 요청 전송
+      publish(`/app/room/${roomId}/quiz/generate`, {
+        mainCategory: room.mainCategory,
+        subCategory: room.subCategory,
+        difficulty: room.difficulty,
+        problemCount: room.problemCount || 5,
+        timestamp: Date.now()
       });
       
-      console.log("게임이 시작되었습니다.");
+      console.log("AI 퀴즈 생성 요청 전송됨:", {
+        mainCategory: room.mainCategory,
+        subCategory: room.subCategory,
+        difficulty: room.difficulty,
+        problemCount: room.problemCount || 5
+      });
+      
+      // 퀴즈 생성 상태 구독 (없는 경우 새로 구독)
+      if (!subscribers.includes(`/topic/room/${roomId}/quiz/generation`)) {
+        subscribe(`/topic/room/${roomId}/quiz/generation`, (data) => {
+          console.log("퀴즈 생성 상태 업데이트:", data);
+          
+          // 퀴즈 생성 상태에 따른 처리
+          if (data.status === "STARTED" || data.status === "IN_PROGRESS") {
+            // 진행 상태 메시지 전송
+            publish(`/app/room/chat/${roomId}`, {
+              type: "SYSTEM",
+              content: data.message || "문제 생성이 진행 중입니다...",
+              timestamp: Date.now()
+            });
+          } else if (data.status === "COMPLETED") {
+            // 완료 메시지 전송
+            publish(`/app/room/chat/${roomId}`, {
+              type: "SYSTEM",
+              content: "문제 생성 완료! 곧 게임이 시작됩니다.",
+              timestamp: Date.now()
+            });
+            
+            // 게임 상태 업데이트
+            setGameStatus('IN_GAME');
+            
+            // 방 상태 업데이트
+            setRoom(prevRoom => {
+              if (!prevRoom) return prevRoom;
+              
+              // 타입이 맞는 방식으로 업데이트
+              const updatedRoom: RoomResponse = {
+                ...prevRoom,
+                status: 'IN_GAME' as "WAITING" | "IN_GAME" | "FINISHED" 
+              };
+              
+              // 상태 브로드캐스트
+              publish(`/app/room/${roomId}/status`, {
+                room: updatedRoom,
+                players: players,
+                gameStatus: 'IN_GAME',
+                timestamp: Date.now()
+              });
+              
+              return updatedRoom;
+            });
+          } else if (data.status === "FAILED") {
+            // 실패 시 에러 메시지 표시
+            publish(`/app/room/chat/${roomId}`, {
+              type: "SYSTEM",
+              content: data.message || "문제 생성에 실패했습니다. 다시 시도해주세요.",
+              timestamp: Date.now()
+            });
+            
+            // 게임 상태 롤백
+            setGameStatus('WAITING');
+            console.error("문제 생성 실패:", data.message);
+          }
+        });
+        
+        // 구독 목록에 추가
+        setSubscribers(prev => [...prev, `/topic/room/${roomId}/quiz/generation`]);
+      }
+      
     } catch (error) {
       console.error("게임 시작에 실패했습니다:", error);
+      
+      // 에러 메시지 표시
+      publish(`/app/room/chat/${roomId}`, {
+        type: "SYSTEM",
+        content: "게임 시작에 실패했습니다. 잠시 후 다시 시도해주세요.",
+        timestamp: Date.now()
+      });
+      
+      // 게임 상태 원상복구
+      setGameStatus('WAITING');
       alert("게임 시작에 실패했습니다. 다시 시도해주세요.");
     }
   };
@@ -1032,6 +1093,26 @@ export default function RoomPage() {
     // URL로 직접 접근 시에도 작동하도록 함
     localStorage.setItem('intentional_navigation', 'true');
   }, []);
+
+  // 컴포넌트 언마운트 시 구독 해제 및 소켓 연결 종료
+  useEffect(() => {
+    return () => {
+      try {
+        // 채팅 구독 해제
+        unsubscribe(`/topic/room/chat/${roomId}`);
+        
+        // 방 상태 구독 해제
+        unsubscribe(`/topic/room/${roomId}/status`);
+        
+        // 퀴즈 생성 상태 구독 해제
+        unsubscribe(`/topic/room/${roomId}/quiz/generation`);
+        
+        console.log("WebSocket 구독 해제 완료");
+      } catch (e) {
+        console.error("WebSocket 구독 해제 중 오류 발생:", e);
+      }
+    };
+  }, [roomId]);
 
   if (loading) {
     return (
@@ -1150,8 +1231,13 @@ export default function RoomPage() {
             <div className="flex-grow bg-gray-800/20 rounded-2xl overflow-hidden">
               <GameContainer 
                 roomId={roomId} 
-                currentUserId={currentUserId || 0} 
                 players={players}
+                room={room}
+                currentUserId={currentUser?.id}
+                onGameEnd={() => setGameStatus('WAITING')}
+                publish={publish}
+                subscribe={subscribe}
+                unsubscribe={unsubscribe}
               />
             </div>
           ) : (
