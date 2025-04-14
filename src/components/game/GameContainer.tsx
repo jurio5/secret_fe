@@ -65,15 +65,73 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     subscribe(`/topic/room/${roomId}/question`, (data) => {
       console.log("문제 변경 이벤트 수신:", data);
       
-      if (data.questionIndex !== undefined) {
-        setCurrentQuestionIndex(data.questionIndex);
-        setSelectedAnswer(null);
-        setAnswerSubmitted(false);
-        setShowResults(false);
-        
-        if (questions[data.questionIndex]) {
-          setTimeLeft(questions[data.questionIndex].timeLimit);
+      setCurrentQuestionIndex(data.questionIndex);
+      setAnswerSubmitted(false);
+      setSelectedAnswer(null);
+      setShowResults(false);
+      
+      // 서버에서 받은 문제 데이터 처리
+      if (data.questionText) {
+        try {
+          // 질문 텍스트 파싱
+          const questionTextRaw = data.questionText.replace(/^"|"$/g, '');
+          const lines = questionTextRaw.split('\\n').filter((line: string) => line.trim() !== '');
+          
+          // 첫 번째 줄은 문제 제목
+          const questionText = lines[0].replace(/^\d+:\s*/, '');
+          
+          // 선택지 추출
+          const choices: string[] = [];
+          for (let i = 1; i < lines.length; i++) {
+            if (lines[i].match(/^[a-d]\)/)) {
+              choices.push(lines[i].replace(/^[a-d]\)\s*/, ''));
+            }
+          }
+          
+          // 정답 처리
+          const correctAnswer = data.correctAnswer.replace(/^"|"$/g, '');
+          const correctAnswerIndex = correctAnswer.charCodeAt(0) - 'a'.charCodeAt(0);
+          
+          // 새 문제 객체 생성
+          const newQuestion: QuizQuestionType = {
+            id: `q${data.questionIndex + 1}`,
+            questionNumber: data.questionIndex + 1,
+            question: questionText,
+            choices: choices,
+            correctAnswer: correctAnswerIndex,
+            category: "HISTORY",  // 기본값 설정 또는 서버에서 받을 경우 업데이트
+            subCategory: "KOREAN_HISTORY",
+            explanation: "서버에서 제공된 문제입니다.",
+            timeLimit: 15  // 기본 시간 제한
+          };
+          
+          console.log("생성된 문제 객체:", newQuestion);
+          
+          // questions 배열 업데이트
+          setQuestions(prevQuestions => {
+            const updatedQuestions = [...prevQuestions];
+            updatedQuestions[data.questionIndex] = newQuestion;
+            return updatedQuestions;
+          });
+          
+          // 타이머 시작 (3초 지연)
+          setTimeout(() => {
+            console.log("타이머 시작: 15초");
+            setTimeLeft(15);
+            setGameStatus("IN_PROGRESS");
+            console.log("문제가 화면에 표시되었습니다:", questionText);
+          }, 3000);
+        } catch (error) {
+          console.error("문제 데이터 파싱 중 오류 발생:", error);
         }
+      }
+      // 이미 questions 배열에 문제가 있는 경우
+      else if (questions[data.questionIndex]) {
+        setTimeout(() => {
+          console.log("타이머 시작: 15초");
+          setTimeLeft(15);
+          console.log("문제가 화면에 표시되었습니다:", questions[data.questionIndex].question);
+        }, 3000); // 3초 지연
       }
     });
     
@@ -196,9 +254,6 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       });
       
       console.log("웹소켓을 통해 퀴즈 생성 요청 전송");
-      
-      // 퀴즈 생성은 웹소켓 응답으로 처리되므로 여기서는 요청만 보내고 반환
-      // 퀴즈 ID와 문제는 /topic/room/${roomId}/status 이벤트를 통해 수신됨
       
       // 백업 처리: 20초 내에 응답이 없으면 더미 데이터 사용
       setTimeout(() => {

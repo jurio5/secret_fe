@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface TimerProps {
   initialTime: number;
@@ -11,6 +11,7 @@ interface TimerProps {
 export default function Timer({ initialTime, onExpire, show }: TimerProps) {
   const [timeLeft, setTimeLeft] = useState<number>(initialTime);
   const [isPaused, setIsPaused] = useState<boolean>(false);
+  const hasExpiredRef = useRef<boolean>(false);
   
   // 타이머 표시 여부에 따라 일시 정지
   useEffect(() => {
@@ -25,21 +26,27 @@ export default function Timer({ initialTime, onExpire, show }: TimerProps) {
   useEffect(() => {
     setTimeLeft(initialTime);
     setIsPaused(false);
+    hasExpiredRef.current = false;
   }, [initialTime]);
   
   // 타이머 카운트다운
   useEffect(() => {
-    if (timeLeft <= 0 || isPaused) return;
+    // 일시 정지된 경우만 타이머 중지
+    if (isPaused) return;
+    
+    // timeLeft가 0이면 onExpire 호출 (최초 1회만)
+    if (timeLeft === 0 && !hasExpiredRef.current) {
+      hasExpiredRef.current = true;
+      onExpire();
+      return;
+    }
+    
+    // 이미 만료되었거나 시간이 0이면 추가 처리 없음
+    if (timeLeft <= 0) return;
     
     const timer = setTimeout(() => {
-      if (timeLeft > 0) {
-        setTimeLeft(timeLeft - 1);
-      }
-      
-      if (timeLeft === 1) {
-        // 시간이 끝날 때 콜백 호출
-        onExpire();
-      }
+      // 남은 시간 감소
+      setTimeLeft(timeLeft - 1);
     }, 1000);
     
     return () => clearTimeout(timer);
