@@ -691,6 +691,10 @@ export default function RoomPage() {
               };
               publish(`/app/room/${roomId}/status`, roomStatusData);
               console.log("방 입장 후 추가 브로드캐스트 완료");
+              
+              // 플레이어 목록 명시적 갱신 요청
+              publish(`/app/room/${roomId}/players/refresh`, {});
+              console.log("방 입장 후 플레이어 목록 명시적 갱신 요청");
             }
           }, 2000);
         } else {
@@ -733,6 +737,10 @@ export default function RoomPage() {
   useEffect(() => {
     if (!playersInitialized.current && room && currentUser && players.length === 0) {
       console.log("강제 플레이어 목록 초기화 시도");
+      
+      // 플레이어 목록 명시적 갱신 요청
+      publish(`/app/room/${roomId}/players/refresh`, {});
+      console.log("플레이어 목록 명시적 갱신 요청 전송");
       
       // 현재 사용자 정보가 유효한지 확인
       if (!currentUser.id || !currentUser.nickname) {
