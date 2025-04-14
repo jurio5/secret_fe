@@ -100,26 +100,18 @@ function RoomContent() {
   // 방 정보 가져오기
   const fetchRoomData = async () => {
     try {
-      // 백엔드 URL을 직접 지정하여 API 호출
-      const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}`, {
-        method: 'GET',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
+      const response = await client.GET(`/api/v1/rooms/{roomId}`, {
+        params: { path: { roomId: parseInt(roomId) } }
+      }) as ApiResponse<RoomResponse>;
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        setError(errorText || "방 정보를 불러오는데 실패했습니다.");
+      if (response.error) {
+        setError(response.error.message || "방 정보를 불러오는데 실패했습니다.");
         return null;
       }
       
-      const responseData = await response.json();
-      console.log("방 정보:", responseData.data);
-      
-      if (responseData.data) {
-        const roomData = responseData.data;
+      if (response.data?.data) {
+        console.log("방 정보:", response.data.data);
+        const roomData = response.data.data;
         setRoom(roomData);
         return roomData;
       }
@@ -136,24 +128,15 @@ function RoomContent() {
   // 현재 사용자 정보 가져오기
   const fetchCurrentUser = async () => {
     try {
-      // 백엔드 URL 직접 지정
-      const response = await fetch("https://quizzle.p-e.kr/api/v1/members/me", {
-        method: 'GET',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
+      const response = await client.GET("/api/v1/members/me") as ApiResponse<User>;
       
-      if (!response.ok) {
-        console.error("사용자 정보를 가져오는데 실패했습니다:", response.statusText);
+      if (response.error) {
+        console.error("사용자 정보를 가져오는데 실패했습니다:", response.error);
         return null;
       }
       
-      const responseData = await response.json();
-      
-      if (responseData.data) {
-        const userData = responseData.data;
+      if (response.data?.data) {
+        const userData = response.data.data;
         setCurrentUser(userData);
         
         // 방장 여부 확인
@@ -206,24 +189,12 @@ function RoomContent() {
             // 약간의 지연 후 API로 방 정보 갱신 (서버 처리 시간 고려)
             setTimeout(async () => {
               try {
-                // 백엔드 URL을 직접 지정하여 API 호출
-                const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}`, {
-                  method: 'GET',
-                  credentials: 'include',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  }
-                });
+                const response = await client.GET(`/api/v1/rooms/{roomId}`, {
+                  params: { path: { roomId: parseInt(roomId) } }
+                }) as ApiResponse<RoomResponse>;
                 
-                if (!response.ok) {
-                  console.error("방 정보 갱신 실패:", response.statusText);
-                  return;
-                }
-                
-                const responseData = await response.json();
-                
-                if (responseData.data) {
-                  const roomData = responseData.data;
+                if (response.data?.data) {
+                  const roomData = response.data.data;
                   console.log(`${data.type} 이후 방 정보 갱신:`, roomData);
                   
                   // 방 정보 업데이트
@@ -553,19 +524,10 @@ function RoomContent() {
         await new Promise(resolve => setTimeout(resolve, 300));
       }
       
-      // 방 입장 API 호출 - 백엔드 URL 직접 지정
-      const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}/join`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      // 방 입장 API 호출
+      await client.POST(`/api/v1/rooms/{roomId}/join`, {
+        params: { path: { roomId: parseInt(roomId) } }
       });
-      
-      if (!response.ok) {
-        console.error("방 입장 실패:", response.statusText);
-        throw new Error("방 입장에 실패했습니다.");
-      }
       
       // 입장 이벤트 발행
       publish(`/app/room/${roomId}`, {
@@ -629,19 +591,10 @@ function RoomContent() {
     try {
       console.log("방 나가기 시도:", roomId, currentUser);
       
-      // 방 나가기 API 호출 - 백엔드 URL 직접 지정
-      const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}/leave`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      // 방 나가기 API 호출
+      await client.POST(`/api/v1/rooms/{roomId}/leave`, {
+        params: { path: { roomId: parseInt(roomId) } }
       });
-      
-      if (!response.ok) {
-        console.error("방 나가기 실패:", response.statusText);
-        throw new Error("방 나가기에 실패했습니다.");
-      }
       
       // 떠나는 메시지 발행
       publish(`/app/room/chat/${roomId}`, {
@@ -739,22 +692,10 @@ function RoomContent() {
         return updated;
       });
       
-      // 준비 상태 변경 API 호출 - 백엔드 URL 직접 지정
-      const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}/ready`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      // 준비 상태 변경 API 호출
+      await client.POST(`/api/v1/rooms/{roomId}/ready`, {
+        params: { path: { roomId: parseInt(roomId) } }
       });
-      
-      if (!response.ok) {
-        console.error("준비 상태 변경 실패:", response.statusText);
-        
-        // 실패 시 상태 복원
-        setIsReady(!newReadyState);
-        return;
-      }
       
       // 메시지 발행
       if (currentUser) {
@@ -807,29 +748,43 @@ function RoomContent() {
       }
     } catch (error) {
       console.error("준비 상태 변경에 실패했습니다:", error);
+      
+      // 에러 발생 시 상태 원복
+      const newReadyState = !isReady; // 현재 상태 (업데이트된 상태)
+      setIsReady(!newReadyState); // 원래 상태로 되돌림
+      setPlayers(prev => prev.map(player => {
+        if (currentUser && player.id === String(currentUser.id)) {
+          return { ...player, isReady: !newReadyState };
+        }
+        return player;
+      }));
+      
+      setToast({
+        type: "error",
+        message: "준비 상태 변경에 실패했습니다.",
+        duration: 3000
+      });
     }
   };
   
   // 게임 시작
   const startGame = async () => {
-    if (!isOwner || !room || room.status !== 'WAITING') {
-      console.log("게임 시작 권한이 없거나 이미 게임이 시작됨");
-      return;
-    }
-    
-    if (players.length < 1) {
+    // 방장이 아니거나 게임이 이미 시작된 경우 처리하지 않음
+    if (!isOwner || room?.status !== 'WAITING') {
       setToast({
         type: "error",
-        message: "게임을 시작하려면 최소 1명의 플레이어가 필요합니다.",
+        message: "게임을 시작할 수 없습니다.",
         duration: 3000
       });
       return;
     }
     
-    const notReadyPlayers = players.filter(p => !p.isOwner && !p.isReady);
-    if (notReadyPlayers.length > 0) {
+    // 모든 플레이어가 준비 완료인지 확인
+    const allPlayersReady = players.every(player => player.isOwner || player.isReady);
+    
+    if (!allPlayersReady) {
       setToast({
-        type: "error",
+        type: "warning",
         message: "모든 플레이어가 준비를 완료해야 합니다.",
         duration: 3000
       });
@@ -837,33 +792,10 @@ function RoomContent() {
     }
     
     try {
-      // 게임 시작 API 호출 - 백엔드 URL 직접 지정
-      const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}/start`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      // 게임 시작 API 호출
+      await client.POST(`/api/v1/rooms/{roomId}/start`, {
+        params: { path: { roomId: parseInt(roomId) } }
       });
-      
-      if (!response.ok) {
-        console.error("게임 시작 실패:", response.statusText);
-        let errorMessage = "게임 시작에 실패했습니다.";
-        
-        try {
-          const errorData = await response.json();
-          if (errorData?.error?.message) {
-            errorMessage = errorData.error.message;
-          }
-        } catch (e) {}
-        
-        setToast({
-          type: "error",
-          message: errorMessage,
-          duration: 3000
-        });
-        return;
-      }
       
       // 게임 시작 메시지 발행
       publish(`/app/room/chat/${roomId}`, {
@@ -874,17 +806,19 @@ function RoomContent() {
         timestamp: Date.now()
       });
       
-      // 게임 시작 이벤트 발행
+      // 게임 상태 업데이트
       publish(`/app/room/${roomId}`, {
         type: "GAME_START",
         roomId: parseInt(roomId),
         senderId: currentUser?.id.toString() || "system",
         senderName: currentUser?.nickname || "System",
         content: "게임이 시작되었습니다!",
+        data: JSON.stringify({ 
+          roomStatus: 'IN_GAME',
+          room: { ...room, status: 'IN_GAME' }
+        }),
         timestamp: Date.now()
       });
-      
-      // 게임 페이지로 리다이렉션 (백엔드 이벤트로 인해 자동으로 이루어짐)
     } catch (error) {
       console.error("게임 시작에 실패했습니다:", error);
       setToast({
