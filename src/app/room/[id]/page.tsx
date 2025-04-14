@@ -416,15 +416,13 @@ function RoomContent() {
       console.log("입장 이벤트 수신:", message);
       // 상태 요청 발행 (새로운 플레이어 정보 가져오기)
       setTimeout(() => {
-        publish(`/app/room/${roomId}`, {
-          type: "JOIN",
+        publish(`/app/room/status/${roomId}`, {
+          type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
-          playerId: currentUser?.id,
-          playerNickname: currentUser?.nickname,
-          senderId: currentUser?.id.toString(),
-          senderName: currentUser?.nickname,
-          content: `${currentUser?.nickname}님이 입장했습니다.`,
-          data: JSON.stringify({ playerInfo: { id: currentUser?.id, nickname: currentUser?.nickname } }),
+          senderId: currentUser?.id.toString() || "system",
+          senderName: currentUser?.nickname || "System",
+          content: "입장 이벤트 수신 후 상태 업데이트 요청",
+          data: JSON.stringify({ requestType: "STATUS_UPDATE", event: "JOIN" }),
           timestamp: Date.now()
         });
       }, 100);
@@ -434,15 +432,13 @@ function RoomContent() {
       console.log("퇴장 이벤트 수신:", message);
       // 상태 요청 발행 (플레이어 목록 업데이트)
       setTimeout(() => {
-        publish(`/app/room/${roomId}`, {
-          type: "LEAVE",
+        publish(`/app/room/status/${roomId}`, {
+          type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
-          playerId: currentUser?.id,
-          playerNickname: currentUser?.nickname,
-          senderId: currentUser?.id.toString(),
-          senderName: currentUser?.nickname,
-          content: `${currentUser?.nickname}님이 퇴장했습니다.`,
-          data: JSON.stringify({ playerInfo: { id: currentUser?.id, nickname: currentUser?.nickname } }),
+          senderId: currentUser?.id.toString() || "system",
+          senderName: currentUser?.nickname || "System",
+          content: "퇴장 이벤트 수신 후 상태 업데이트 요청",
+          data: JSON.stringify({ requestType: "STATUS_UPDATE", event: "LEAVE" }),
           timestamp: Date.now()
         });
       }, 100);
@@ -840,7 +836,7 @@ function RoomContent() {
         console.log("방 상태 주기적 요청");
         
         // 방 상태 요청 (WebSocket)
-        publish(`/app/room/${roomId}`, {
+        publish(`/app/room/status/${roomId}`, {
           type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
           senderId: currentUser.id.toString(),
