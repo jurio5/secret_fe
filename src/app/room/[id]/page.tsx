@@ -331,33 +331,55 @@ function RoomContent() {
         // 디버깅을 위한 상세 로그
         console.log("파싱된 상태 데이터:", status);
         
+        // 플레이어 목록 업데이트 함수 - 일관된 방식으로 처리
+        const updatePlayersState = (playersData: any[]) => {
+          console.log("플레이어 목록 업데이트 전:", players);
+          console.log("받은 플레이어 목록:", playersData);
+          
+          // 플레이어 데이터 표준화
+          const formattedPlayers = playersData.map((player: any) => {
+            const id = String(player.id || '');
+            const nickname = player.nickname || player.name || '알 수 없음';
+            const avatarUrl = player.avatarUrl || DEFAULT_AVATAR;
+            const isPlayerOwner = room ? String(room.ownerId) === id : false;
+            const isPlayerReady = Boolean(player.isReady);
+            
+            console.log(`플레이어 정보 처리: id=${id}, nickname=${nickname}, isReady=${isPlayerReady}`);
+            
+            return {
+              id,
+              nickname,
+              avatarUrl,
+              isOwner: isPlayerOwner,
+              isReady: isPlayerReady
+            };
+          });
+          
+          console.log("포맷된 플레이어 목록:", formattedPlayers);
+          
+          // 플레이어 목록 완전 교체 (병합 아님)
+          setPlayers([...formattedPlayers]);
+          
+          // 자신의 상태 확인
+          if (currentUser) {
+            const playerInfo = formattedPlayers.find((p: any) => 
+              String(p.id) === String(currentUser.id)
+            );
+            
+            if (playerInfo) {
+              console.log("내 준비 상태 업데이트:", playerInfo.isReady);
+              setIsReady(playerInfo.isReady);
+            }
+          }
+        };
+        
         // requestType이 STATUS_UPDATE이고 플레이어 정보가 없는 경우
         if (status.requestType === "STATUS_UPDATE" && !status.players) {
           console.log("상태 업데이트 메시지에 플레이어 정보가 없음, fetchRoomData 호출");
           fetchRoomData().then(roomData => {
             if (roomData && roomData.players) {
               console.log("API로 가져온 플레이어 정보:", roomData.players);
-              // 플레이어 정보가 있으면 상태 업데이트
-              const formattedPlayers = roomData.players.map((player: any) => {
-                const id = String(player.id || '');
-                const nickname = player.nickname || player.name || '알 수 없음';
-                const avatarUrl = player.avatarUrl || DEFAULT_AVATAR;
-                const isPlayerOwner = room ? String(room.ownerId) === id : false;
-                const isPlayerReady = Boolean(player.isReady);
-                
-                return {
-                  id,
-                  nickname,
-                  avatarUrl,
-                  isOwner: isPlayerOwner,
-                  isReady: isPlayerReady
-                };
-              });
-              
-              if (JSON.stringify(formattedPlayers) !== JSON.stringify(players)) {
-                console.log("API로 가져온 플레이어 목록으로 상태 업데이트");
-                setPlayers([...formattedPlayers]);
-              }
+              updatePlayersState(roomData.players);
             }
           });
           return;
@@ -378,49 +400,23 @@ function RoomContent() {
           }
         }
         
-        // 플레이어 목록 업데이트
+        // 플레이어 목록 업데이트 - 중앙 집중식 처리
         if (status.players && Array.isArray(status.players)) {
-          console.log("플레이어 목록 업데이트 전:", players);
-          console.log("받은 플레이어 목록:", status.players);
-          
-          // 플레이어 데이터 구조 확인 및 표준화
-          const formattedPlayers = status.players.map((player: any) => {
-            // 기본 필드 확인 및 기본값 설정
-            const id = String(player.id || '');
-            const nickname = player.nickname || player.name || '알 수 없음';
-            const avatarUrl = player.avatarUrl || DEFAULT_AVATAR;
-            const isPlayerOwner = room ? String(room.ownerId) === id : false;
-            const isPlayerReady = Boolean(player.isReady);
-            
-            console.log(`플레이어 정보 처리: id=${id}, nickname=${nickname}, isReady=${isPlayerReady}`);
-            
-            return {
-              id,
-              nickname,
-              avatarUrl,
-              isOwner: isPlayerOwner,
-              isReady: isPlayerReady
-            };
-          });
-          
-          console.log("포맷된 플레이어 목록:", formattedPlayers);
-          
-          // 플레이어 목록이 변경된 경우에만 상태 업데이트 - 커스텀 비교
-          if (JSON.stringify(formattedPlayers) !== JSON.stringify(players)) {
-            console.log("플레이어 목록 변경 감지, 상태 업데이트");
-            setPlayers([...formattedPlayers]);
-          }
-          
-          // 자신의 준비 상태 확인
-          if (currentUser) {
-            const playerInfo = formattedPlayers.find((p: any) => 
-              String(p.id) === String(currentUser.id)
-            );
-            
-            if (playerInfo) {
-              console.log("내 준비 상태 업데이트:", playerInfo.isReady);
-              setIsReady(playerInfo.isReady);
+          updatePlayersState(status.players);
+        } else if (status.data) {
+          // data 필드에서 플레이어 정보 추출
+          try {
+            let playersData;
+            if (typeof status.data === 'string') {
+              playersData = JSON.parse(status.data);
+              if (Array.isArray(playersData)) {
+                updatePlayersState(playersData);
+              }
+            } else if (Array.isArray(status.data)) {
+              updatePlayersState(status.data);
             }
+          } catch (error) {
+            console.error("플레이어 데이터 처리 오류:", error);
           }
         }
         
@@ -443,12 +439,12 @@ function RoomContent() {
       }
     });
     
-    // 입장/퇴장 이벤트 구독 (실시간 인원 변동 감지용)
+    // 입장/퇴장 이벤트 구독 (통합 처리)
     subscribe(`/topic/room/${roomId}/join`, (message) => {
       console.log("입장 이벤트 수신:", message);
-      // 상태 요청 발행 (새로운 플레이어 정보 가져오기)
+      // 상태 요청 발행 (단일 엔드포인트 사용)
       setTimeout(() => {
-        publish(`/app/room/status/${roomId}`, {
+        publish(`/app/room/${roomId}/status`, {
           type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
           senderId: currentUser?.id.toString() || "system",
@@ -462,9 +458,9 @@ function RoomContent() {
     
     subscribe(`/topic/room/${roomId}/leave`, (message) => {
       console.log("퇴장 이벤트 수신:", message);
-      // 상태 요청 발행 (플레이어 목록 업데이트)
+      // 상태 요청 발행 (단일 엔드포인트 사용)
       setTimeout(() => {
-        publish(`/app/room/status/${roomId}`, {
+        publish(`/app/room/${roomId}/status`, {
           type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
           senderId: currentUser?.id.toString() || "system",
@@ -567,7 +563,7 @@ function RoomContent() {
       
       // 방 상태 정보 요청 (플레이어 목록 포함)
       setTimeout(() => {
-        publish(`/app/room/status/${roomId}`, {
+        publish(`/app/room/${roomId}/status`, {
           type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
           senderId: currentUser?.id.toString() || "system",
@@ -739,7 +735,7 @@ function RoomContent() {
         
         // 방 상태 업데이트 요청 - 모든 클라이언트에 상태 갱신 트리거
         setTimeout(() => {
-          publish(`/app/room/status/${roomId}`, {
+          publish(`/app/room/${roomId}/status`, {
             type: "ROOM_UPDATED",
             roomId: parseInt(roomId),
             senderId: currentUser?.id.toString() || "system",
@@ -860,44 +856,6 @@ function RoomContent() {
     setChatMessages(prev => [...prev, messageWithId]);
   };
   
-  // 방에 입장할 때 주기적으로 방 상태 및 플레이어 목록 요청
-  useEffect(() => {
-    // 컴포넌트 마운트 후 방 상태 및 플레이어 목록 주기적으로 요청
-    const statusInterval = setInterval(() => {
-      if (isConnected && roomId && currentUser) {
-        console.log("방 상태 주기적 요청");
-        
-        // 방 상태 요청 (WebSocket)
-        publish(`/app/room/status/${roomId}`, {
-          type: "ROOM_UPDATED",
-          roomId: parseInt(roomId),
-          senderId: currentUser.id.toString(),
-          senderName: currentUser.nickname,
-          content: "주기적 상태 업데이트 요청",
-          data: JSON.stringify({ 
-            requestType: "STATUS_UPDATE",
-            timestamp: Date.now()
-          }),
-          timestamp: Date.now()
-        });
-        
-        // REST API를 통한 방 상태 요청 추가 (백업)
-        if (!isWebSocketConnected()) {
-          console.log("웹소켓 연결 안됨, API로 상태 요청");
-          fetchRoomData().then(roomData => {
-            if (roomData) {
-              console.log("API로 가져온 방 정보:", roomData);
-            }
-          });
-        }
-      }
-    }, 2000); // 2초마다 요청 (로비와 동일하게 빈도 조정)
-    
-    return () => {
-      clearInterval(statusInterval);
-    };
-  }, [roomId, isConnected, currentUser, publish, fetchRoomData, isWebSocketConnected]);
-  
   // 채팅 메시지 디버깅용 효과
   useEffect(() => {
     console.log("채팅 메시지 목록 변경:", chatMessages);
@@ -934,7 +892,7 @@ function RoomContent() {
       if (!myPlayer) {
         console.log("경고: 내가 플레이어 목록에 없음, 상태 요청");
         // 상태 요청 발행
-        publish(`/app/room/status/${roomId}`, {
+        publish(`/app/room/${roomId}/status`, {
           type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
           senderId: currentUser.id.toString(),
