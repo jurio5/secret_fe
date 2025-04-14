@@ -56,11 +56,57 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   const [showFinalResults, setShowFinalResults] = useState<boolean>(false);
   const [quizId, setQuizId] = useState<string | null>(null);
   
+  // 퀴즈 생성 진행 상태 관리
+  const [quizGenerationStatus, setQuizGenerationStatus] = useState<{
+    status: "IDLE" | "STARTED" | "IN_PROGRESS" | "COMPLETED" | "FAILED";
+    message: string;
+    progress: number;
+    stage?: number;
+    totalStages?: number;
+    stageDescription?: string;
+    animation?: string;
+  }>({
+    status: "IDLE",
+    message: "준비 중입니다...",
+    progress: 0,
+  });
+  
   // 현재 문제 정보
   const currentQuestion = questions[currentQuestionIndex];
   
   // 웹소켓 구독 설정
   useEffect(() => {
+    // 퀴즈 생성 상태 구독
+    subscribe(`/topic/room/${roomId}/quiz/generation`, (data) => {
+      console.log("퀴즈 생성 상태 수신:", data);
+      setQuizGenerationStatus({
+        status: data.status,
+        message: data.message || "퀴즈를 생성 중입니다...",
+        progress: data.progress || 0,
+        stage: data.stage,
+        totalStages: data.totalStages,
+        stageDescription: data.stageDescription,
+        animation: data.animation
+      });
+      
+      // 퀴즈 생성이 완료되면 게임 시작 메시지 전송
+      if (data.status === "COMPLETED") {
+        console.log("퀴즈 생성이 완료되었습니다. 게임을 시작합니다.");
+        
+        // 백엔드에서 전달받은 퀴즈 ID 저장
+        if (data.quizId) {
+          setQuizId(data.quizId);
+          console.log("백엔드에서 받은 퀴즈 ID:", data.quizId);
+        }
+        
+        // 게임 시작 알림
+        publish(`/app/room/${roomId}/game/start`, {
+          roomId: roomId,
+          timestamp: Date.now()
+        });
+      }
+    });
+    
     // 문제 변경 이벤트 구독
     subscribe(`/topic/room/${roomId}/question`, (data) => {
       console.log("문제 변경 이벤트 수신:", data);
@@ -114,24 +160,21 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
             return updatedQuestions;
           });
           
-          // 타이머 시작 (3초 지연)
-          setTimeout(() => {
-            console.log("타이머 시작: 15초");
-            setTimeLeft(15);
-            setGameStatus("IN_PROGRESS");
-            console.log("문제가 화면에 표시되었습니다:", questionText);
-          }, 3000);
+          // 타이머 즉시 시작 (딜레이 제거)
+          console.log("타이머 시작: 15초");
+          setTimeLeft(15);
+          setGameStatus("IN_PROGRESS");
+          console.log("문제가 화면에 표시되었습니다:", questionText);
         } catch (error) {
           console.error("문제 데이터 파싱 중 오류 발생:", error);
         }
       }
       // 이미 questions 배열에 문제가 있는 경우
       else if (questions[data.questionIndex]) {
-        setTimeout(() => {
-          console.log("타이머 시작: 15초");
-          setTimeLeft(15);
-          console.log("문제가 화면에 표시되었습니다:", questions[data.questionIndex].question);
-        }, 3000); // 3초 지연
+        // 딜레이 제거하고 즉시 시작
+        console.log("타이머 시작: 15초");
+        setTimeLeft(15);
+        console.log("문제가 화면에 표시되었습니다:", questions[data.questionIndex].question);
       }
     });
     
@@ -255,13 +298,13 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       
       console.log("웹소켓을 통해 퀴즈 생성 요청 전송");
       
-      // 백업 처리: 20초 내에 응답이 없으면 더미 데이터 사용
+      // 백업 처리: 15초 내에 응답이 없으면 더미 데이터 사용 (20초에서 15초로 변경)
       setTimeout(() => {
-        if (questions.length === 0) {
+        if (questions.length === 0 && quizGenerationStatus.status !== "COMPLETED") {
           console.warn("퀴즈 데이터 수신 시간 초과, 임시 데이터 사용");
           useDummyQuestions();
         }
-      }, 20000);
+      }, 15000);
       
     } catch (error) {
       console.error("퀴즈 생성 요청 중 오류 발생:", error);
@@ -316,10 +359,18 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       setTimeLeft(dummyQuestions[0].timeLimit);
     }
     
+    // 더미 데이터 사용 시에도 여전히 퀴즈 ID가 필요할 경우에만 사용
+    if (!quizId) {
+      const dummyQuizId = `dummy-quiz-${Date.now()}`;
+      setQuizId(dummyQuizId);
+      console.log("더미 퀴즈 ID 생성 (백엔드에서 ID를 받지 못한 경우):", dummyQuizId);
+    }
+    
     // 게임 시작 알림
     publish(`/app/room/${roomId}/game/start`, {
       roomId: roomId,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      quizId: quizId || `dummy-quiz-${Date.now()}`  // 퀴즈 ID가 없는 경우에만 더미 ID 생성
     });
   };
   
@@ -593,10 +644,98 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   // 게임 대기 화면
   if (gameStatus === "WAITING") {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-gray-400">게임이 곧 시작됩니다...</p>
+      <div className="flex flex-col items-center justify-center h-full">
+        <div className="w-full max-w-md bg-gray-800/60 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-gray-700/50">
+          <div className="text-center mb-6">
+            <h2 className="text-xl font-bold text-white">퀴즈 준비 중</h2>
+            <p className="text-gray-400 mt-1">{quizGenerationStatus.message}</p>
+          </div>
+          
+          {/* 프로그레스 바 */}
+          <div className="relative pt-1 mb-4">
+            <div className="mb-2 flex justify-between items-center">
+              <div>
+                <span className="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-blue-200 bg-blue-600">
+                  {quizGenerationStatus.progress}%
+                </span>
+              </div>
+              {quizGenerationStatus.stage && quizGenerationStatus.totalStages && (
+                <div className="text-right">
+                  <span className="text-xs font-semibold inline-block text-blue-200">
+                    단계 {quizGenerationStatus.stage}/{quizGenerationStatus.totalStages}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="overflow-hidden h-2 text-xs flex rounded bg-gray-700">
+              <div 
+                style={{ width: `${quizGenerationStatus.progress}%` }}
+                className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-500 ease-out"
+              ></div>
+            </div>
+            {quizGenerationStatus.stageDescription && (
+              <div className="mt-1 text-xs text-gray-400">
+                {quizGenerationStatus.stageDescription}
+              </div>
+            )}
+          </div>
+          
+          {/* 로딩 애니메이션 */}
+          <div className="flex justify-center items-center py-4">
+            {quizGenerationStatus.status === "STARTED" && (
+              <div className="inline-flex space-x-2">
+                <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce"></div>
+                <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+              </div>
+            )}
+            
+            {quizGenerationStatus.status === "IN_PROGRESS" && (
+              <div className="relative w-16 h-16">
+                <div className="absolute top-0 left-0 w-full h-full border-4 border-t-blue-500 border-r-transparent border-b-indigo-500 border-l-transparent rounded-full animate-spin"></div>
+                <div className="absolute top-2 left-2 w-12 h-12 border-4 border-t-transparent border-r-blue-400 border-b-transparent border-l-indigo-400 rounded-full animate-spin" style={{ animationDelay: '0.1s', animationDuration: '1.2s' }}></div>
+                <div className="absolute top-4 left-4 w-8 h-8 border-4 border-t-blue-300 border-r-transparent border-b-indigo-300 border-l-transparent rounded-full animate-spin" style={{ animationDelay: '0.2s', animationDuration: '1.4s' }}></div>
+              </div>
+            )}
+            
+            {quizGenerationStatus.status === "COMPLETED" && (
+              <div className="rounded-full bg-green-500/20 p-3 flex items-center justify-center">
+                <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            )}
+            
+            {quizGenerationStatus.status === "FAILED" && (
+              <div className="rounded-full bg-red-500/20 p-3 flex items-center justify-center">
+                <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+            )}
+          </div>
+          
+          {/* 플레이어 대기 상태 */}
+          <div className="mt-4 border-t border-gray-700 pt-4">
+            <div className="text-sm font-medium text-white mb-2">참가 플레이어</div>
+            <div className="grid grid-cols-2 gap-2">
+              {playerScores.map(player => (
+                <div 
+                  key={player.id} 
+                  className={`flex items-center p-2 rounded-lg ${
+                    player.id === currentUserId.toString() ? 'bg-blue-600/30 border border-blue-500/50' : 'bg-gray-700/50'
+                  }`}
+                >
+                  <img 
+                    src={player.avatarUrl} 
+                    alt={player.nickname} 
+                    className="w-8 h-8 rounded-full mr-2" 
+                  />
+                  <div className="truncate text-sm text-white">{player.nickname}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     );
