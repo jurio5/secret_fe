@@ -302,19 +302,19 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       setTimeout(() => {
         if (questions.length === 0 && quizGenerationStatus.status !== "COMPLETED") {
           console.warn("퀴즈 데이터 수신 시간 초과, 임시 데이터 사용");
-          useDummyQuestions();
+          handleDummyQuestions();
         }
       }, 15000);
       
     } catch (error) {
       console.error("퀴즈 생성 요청 중 오류 발생:", error);
       // 오류 발생 시 임시 데이터 사용
-      useDummyQuestions();
+      handleDummyQuestions();
     }
   };
   
   // 임시 문제 데이터 사용 함수
-  const useDummyQuestions = () => {
+  const handleDummyQuestions = () => {
     const dummyQuestions: QuizQuestionType[] = [
       {
         id: "q1",
