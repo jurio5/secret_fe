@@ -832,7 +832,7 @@ export default function RoomPage() {
       const newReadyState = !isReady;
       
       // API 호출 - 준비 상태 변경 (as any 타입 캐스팅 사용)
-      await (client.PATCH as any)(`/api/v1/rooms/${roomId}/ready`, {
+      await (client.POST as any)(`/api/v1/rooms/${roomId}/ready`, {
         body: { isReady: newReadyState }
       });
       
@@ -893,7 +893,7 @@ export default function RoomPage() {
       }
       
       // API 호출 - 게임 시작
-      await (client.PATCH as any)(`/api/v1/rooms/${roomId}/start`, {});
+      await (client.POST as any)(`/api/v1/rooms/${roomId}/start`, {});
       
       // 알림 메시지
       publish(`/app/room/chat/${roomId}`, {
