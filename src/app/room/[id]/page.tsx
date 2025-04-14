@@ -373,8 +373,8 @@ function RoomContent() {
           
           console.log("포맷된 플레이어 목록:", formattedPlayers);
           
-          // 상태 업데이트 (함수형 업데이트 사용)
-          setPlayers(formattedPlayers);
+          // 상태 업데이트
+          setPlayers([...formattedPlayers]);
           
           // 자신의 준비 상태 확인
           if (currentUser) {
@@ -388,10 +388,19 @@ function RoomContent() {
             }
           }
           
-          // 강제 리렌더링을 위한 미세 지연 (필요한 경우 사용)
-          setTimeout(() => {
-            setPlayers(prev => [...prev]);
-          }, 50);
+          // 상태가 변경된 경우에만 강제 리렌더링 
+          const hasReadyStateChanged = formattedPlayers.some((newPlayer: PlayerProfile) => {
+            const oldPlayer = players.find(p => p.id === newPlayer.id);
+            return oldPlayer && oldPlayer.isReady !== newPlayer.isReady;
+          });
+          
+          if (hasReadyStateChanged) {
+            console.log("준비 상태 변경 감지, 강제 리렌더링");
+            // 약간의 지연 후 리렌더링
+            setTimeout(() => {
+              setPlayers(prev => [...prev]);
+            }, 50);
+          }
         }
         
         // 게임 상태 변경 처리 (예: 게임 시작 시 게임 페이지로 이동)
@@ -626,6 +635,7 @@ function RoomContent() {
       
       // 메시지 발행
       if (currentUser) {
+        // 채팅 메시지 발행
         publish(`/app/room/chat/${roomId}`, {
           type: "SYSTEM",
           content: `${currentUser.nickname}님이 ${newReadyState ? '준비 완료' : '준비 취소'}하였습니다.`,
@@ -635,14 +645,29 @@ function RoomContent() {
         });
         
         // 준비 상태 변경 이벤트 발행
+        console.log("준비 상태 변경 이벤트 발행:", {
+          roomId: parseInt(roomId),
+          playerId: currentUser.id,
+          isReady: newReadyState
+        });
+        
+        // 준비 상태 변경 이벤트 발행 - /app/room/ready/{roomId} 엔드포인트 사용
         publish(`/app/room/ready/${roomId}`, {
           roomId: parseInt(roomId),
           playerId: currentUser.id,
           isReady: newReadyState,
           timestamp: Date.now()
         });
+        
+        // 방 상태 업데이트 요청 - 모든 클라이언트에 상태 갱신 트리거
+        setTimeout(() => {
+          publish(`/app/room/status/${roomId}`, {
+            type: "STATUS_REQUEST",
+            roomId: parseInt(roomId),
+            timestamp: Date.now()
+          });
+        }, 200);
       }
-      
     } catch (error) {
       console.error("준비 상태 변경에 실패했습니다:", error);
       
@@ -835,6 +860,27 @@ function RoomContent() {
   useEffect(() => {
     console.log("채팅 메시지 목록 변경:", chatMessages);
   }, [chatMessages]);
+  
+  // 플레이어 준비 상태 변화 감지 useEffect 추가
+  useEffect(() => {
+    console.log("플레이어 준비 상태 확인:", players.map(p => ({
+      id: p.id,
+      nickname: p.nickname, 
+      isReady: p.isReady
+    })));
+    
+    // 자신의 준비 상태 확인
+    if (currentUser) {
+      const myPlayer = players.find(p => String(p.id) === String(currentUser.id));
+      if (myPlayer && myPlayer.isReady !== isReady) {
+        console.log("내 준비 상태 불일치 감지:", { 
+          component: isReady, 
+          playersList: myPlayer.isReady 
+        });
+        setIsReady(myPlayer.isReady);
+      }
+    }
+  }, [players, currentUser, isReady]);
   
   // 컴포넌트 초기화 useEffect (가장 중요한 효과, 맨 뒤에 위치해야 함)
   useEffect(() => {
@@ -1056,6 +1102,7 @@ function RoomContent() {
         <div className="w-full md:w-1/3 flex flex-col gap-5">
           {/* 플레이어 목록 컴포넌트 */}
           <PlayerList 
+            key={`player-list-${players.map(p => `${p.id}-${p.isReady}`).join('-')}`}
             players={players}
             currentUserId={currentUser?.id || null}
             isOwner={isOwner}
@@ -1146,4 +1193,3 @@ export default function RoomPage() {
     </AppLayout>
   );
 }
-
