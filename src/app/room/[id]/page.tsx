@@ -8,7 +8,7 @@ import { subscribe, unsubscribe, publish } from "@/lib/backend/stompClient";
 import { components } from "@/lib/backend/apiV1/schema";
 import Image from "next/image";
 import { FaChevronLeft, FaDoorOpen, FaCrown, FaCheck, FaComments, FaUsers, FaInfoCircle, FaPlay, FaBrain, FaList, FaQuestionCircle } from "react-icons/fa";
-
+import GameContainer from "@/components/game/GameContainer";
 // 방 정보 타입
 type RoomResponse = components["schemas"]["RoomResponse"] & {
   // 추가 필드
@@ -414,6 +414,16 @@ export default function RoomPage() {
               console.log(`인원수 변경: ${prevRoom.currentPlayers}명 -> ${updatedRoom.currentPlayers}명`);
             }
             
+            // 방 상태가 변경되면 게임 상태도 함께 업데이트
+            if (prevRoom.status !== updatedRoom.status) {
+              console.log(`방 상태 변경: ${prevRoom.status} -> ${updatedRoom.status}`);
+              if (updatedRoom.status === 'IN_GAME') {
+                setGameStatus('IN_GAME');
+              } else if (updatedRoom.status === 'FINISHED') {
+                setGameStatus('WAITING');
+              }
+            }
+            
             return updatedRoom;
           });
           
@@ -427,6 +437,7 @@ export default function RoomPage() {
         
         if (status.gameStatus) {
           setGameStatus(status.gameStatus);
+          console.log(`게임 상태 업데이트: ${status.gameStatus}`);
         }
         
         // 플레이어 목록이 완전하면 업데이트, 그렇지 않으면 기존 목록 유지
@@ -902,6 +913,9 @@ export default function RoomPage() {
         timestamp: Date.now()
       });
       
+      // 게임 상태 업데이트
+      setGameStatus('IN_GAME');
+      
       // 상태 업데이트 후 브로드캐스트
       setRoom(prevRoom => {
         if (!prevRoom) return prevRoom;
@@ -917,6 +931,7 @@ export default function RoomPage() {
           publish(`/app/room/${roomId}/status`, {
             room: updatedRoom,
             players: players,
+            gameStatus: 'IN_GAME',
             timestamp: Date.now()
           });
           console.log("게임 시작 후 업데이트된 방 상태 브로드캐스트:", updatedRoom);
@@ -1075,7 +1090,7 @@ export default function RoomPage() {
                   </span>
                   <span className="flex items-center">
                     <FaInfoCircle className="mr-1.5" />
-                    {room?.status === 'WAITING' ? '대기중' : '게임중'}
+                    {gameStatus === 'IN_GAME' || room?.status === 'IN_GAME' ? '게임중' : '대기중'}
                   </span>
                 </div>
               </div>
@@ -1130,316 +1145,209 @@ export default function RoomPage() {
             </div>
           </div>
           
-          {/* 메인 콘텐츠 - 데스크톱에서는 좌우로 나누고, 모바일에서는 탭으로 구성 */}
-          <div className="flex-1 flex flex-col md:flex-row gap-5 overflow-hidden">
-            {/* 모바일 탭 메뉴 */}
-            <div className="md:hidden flex rounded-xl overflow-hidden mb-3 bg-gray-800/40 border border-gray-700/50">
-              <button
-                onClick={() => setActiveTab('players')}
-                className={`flex-1 py-3 px-4 text-sm font-medium flex justify-center items-center ${
-                  activeTab === 'players'
-                    ? 'bg-indigo-600/60 text-white'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-700/30'
-                }`}
-              >
-                <FaUsers className="mr-2" />
-                참가자
-              </button>
-              <button
-                onClick={() => setActiveTab('chat')}
-                className={`flex-1 py-3 px-4 text-sm font-medium flex justify-center items-center ${
-                  activeTab === 'chat'
-                    ? 'bg-indigo-600/60 text-white'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-700/30'
-                }`}
-              >
-                <FaComments className="mr-2" />
-                채팅
-              </button>
+          {/* 메인 컨텐츠 영역 - 게임 중이면 게임 화면, 대기 중이면 기존 플레이어 목록 표시 */}
+          {(gameStatus === 'IN_GAME' || room?.status === 'IN_GAME') ? (
+            <div className="flex-grow bg-gray-800/20 rounded-2xl overflow-hidden">
+              <GameContainer 
+                roomId={roomId} 
+                currentUserId={currentUserId || 0} 
+                players={players}
+              />
             </div>
-            
-            {/* 플레이어 목록 */}
-            <div className={`md:w-1/3 bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-5 overflow-hidden flex flex-col ${
-              activeTab !== 'players' && 'hidden md:flex'
-            }`}>
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
-                <FaUsers className="mr-2.5 text-indigo-400" />
-                참가자 목록
-                <span className="ml-2.5 px-2 py-0.5 bg-indigo-900/60 text-indigo-300 text-xs rounded-full">
-                  {players.length}명
-                </span>
-              </h2>
-              
-              {/* 플레이어 목록 디버그 정보 */}
-              {players.length === 0 && (
-                <div className="mb-4 p-3 bg-yellow-900/30 border border-yellow-700/40 rounded-lg text-yellow-200 text-sm">
-                  <div className="font-semibold mb-1">플레이어 목록이 비어있습니다.</div>
-                  <div>현재 방 상태: {room?.status || '정보 없음'}</div>
-                  <div>현재 인원: {room?.currentPlayers || 0}/{room?.capacity || 0}</div>
-                  <div>사용자 ID: {currentUserId || '정보 없음'}</div>
-                  <div className="flex mt-2 space-x-2">
-                    <button 
-                      onClick={() => console.log('Room:', room, 'Players:', players, 'CurrentUser:', currentUser)}
-                      className="px-2 py-1 bg-yellow-800/50 text-yellow-200 rounded-md text-xs hover:bg-yellow-800/70"
-                    >
-                      디버그 정보 출력
-                    </button>
-                    <button 
-                      onClick={() => {
-                        if (currentUser && room) {
-                          const newPlayer = {
-                            id: currentUser.id.toString(),
-                            name: currentUser.nickname,
-                            nickname: currentUser.nickname,
-                            isOwner: currentUser.id === room.ownerId,
-                            isReady: false,
-                            avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR
-                          };
-                          setPlayers([newPlayer]);
-                          console.log("수동으로 플레이어 목록 설정:", newPlayer);
-                          
-                          setRoom(prevRoom => ({
-                            ...prevRoom,
-                            currentPlayers: 1
-                          }));
-                        } else {
-                          console.error("현재 사용자 또는 방 정보 없음");
-                        }
-                      }}
-                      className="px-2 py-1 bg-blue-800/50 text-blue-200 rounded-md text-xs hover:bg-blue-800/70"
-                    >
-                      수동으로 플레이어 추가
-                    </button>
-                  </div>
-                </div>
-              )}
-              
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-                {players.map((player) => (
-                  <div 
-                    key={player.id} 
-                    className={`p-4 rounded-xl transition-all hover:shadow-lg ${
-                      player.isOwner 
-                        ? 'bg-gradient-to-r from-amber-900/40 to-amber-800/30 border border-amber-700/30 hover:from-amber-900/50 hover:to-amber-800/40' 
-                        : player.isReady 
-                          ? 'bg-gradient-to-r from-green-900/40 to-green-800/30 border border-green-700/30 hover:from-green-900/50 hover:to-green-800/40' 
-                          : 'bg-gradient-to-r from-gray-800/60 to-gray-800/40 border border-gray-700/30 hover:from-gray-700/60 hover:to-gray-700/40'
+          ) : (
+            <>
+              {/* 기존 대기실 UI (플레이어 목록, 채팅 등) */}
+              <div className="flex-1 flex flex-col md:flex-row gap-5 overflow-hidden">
+                {/* 모바일 탭 메뉴 */}
+                <div className="md:hidden flex rounded-xl overflow-hidden mb-3 bg-gray-800/40 border border-gray-700/50">
+                  <button
+                    onClick={() => setActiveTab('players')}
+                    className={`flex-1 py-3 px-4 text-sm font-medium flex justify-center items-center ${
+                      activeTab === 'players'
+                        ? 'bg-indigo-600/60 text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-gray-700/30'
                     }`}
                   >
-                    <div className="flex items-center">
-                      <div className="relative w-14 h-14 rounded-full overflow-hidden bg-gray-700 flex-shrink-0 border-2 border-gray-600/50 shadow-md">
-                        {player.avatarUrl ? (
-                          <Image
-                            src={player.avatarUrl}
-                            alt={player.nickname || '사용자'}
-                            fill
-                            className="object-cover"
-                            sizes="56px"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-white font-medium bg-gradient-to-br from-blue-500 to-indigo-600">
-                            {player.nickname ? player.nickname.charAt(0).toUpperCase() : '?'}
-                          </div>
-                        )}
-                        
-                        {/* 상태 아이콘 */}
-                        {player.isOwner ? (
-                          <div className="absolute -bottom-1 -right-1 bg-yellow-500 text-yellow-900 rounded-full w-6 h-6 flex items-center justify-center border-2 border-gray-800 shadow-lg">
-                            <FaCrown className="w-3 h-3" />
-                          </div>
-                        ) : player.isReady ? (
-                          <div className="absolute -bottom-1 -right-1 bg-green-500 text-green-900 rounded-full w-6 h-6 flex items-center justify-center border-2 border-gray-800 shadow-lg">
-                            <FaCheck className="w-3 h-3" />
-                          </div>
-                        ) : null}
-                      </div>
-                      
-                      <div className="ml-4 flex-1">
-                        <div className="flex flex-col sm:flex-row sm:justify-between">
-                          <p className="text-white font-medium text-lg">{player.nickname || '익명 사용자'}</p>
-                          {/* 현재 사용자 표시 */}
-                          {currentUserId !== null && currentUserId.toString() === player.id && (
-                            <span className="px-2 py-0.5 bg-blue-900/50 text-blue-400 text-xs rounded-md inline-block mt-1 sm:mt-0">나</span>
-                          )}
-                        </div>
-                        <p className="text-gray-400 text-sm mt-1 flex items-center">
-                          {player.isOwner 
-                            ? <><FaCrown className="text-yellow-500 mr-1.5" /> 방장</> 
-                            : player.isReady 
-                              ? <><FaCheck className="text-green-500 mr-1.5" /> 준비 완료</> 
-                              : <span className="flex items-center">
-                                  <span className="relative flex h-2 w-2 mr-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                                  </span>
-                                  준비 중
-                                </span>}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            
-            {/* 채팅 영역 */}
-            <div className={`md:flex-1 bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-5 flex flex-col ${
-              activeTab !== 'chat' && 'hidden md:flex'
-            }`}>
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
-                <FaComments className="mr-2.5 text-indigo-400" />
-                방 채팅
-              </h2>
-              
-              {/* 채팅 메시지 영역 */}
-              <div 
-                ref={chatContainerRef}
-                className="flex-1 overflow-y-auto pr-1 custom-scrollbar bg-gray-900/30 rounded-xl p-4 mb-4"
-              >
-                <div className="space-y-3">
-                  {chatMessages.map((msg, index) => (
-                    <div 
-                      key={index} 
-                      className={`${
-                        msg.type === "SYSTEM" 
-                          ? "flex justify-center" 
-                          : "flex"
-                      }`}
-                    >
-                      {msg.type === "SYSTEM" ? (
-                        <div className="bg-gray-800/70 text-gray-300 text-xs py-1.5 px-4 rounded-full">
-                          {msg.content || '시스템 메시지'}
-                        </div>
-                      ) : (
-                        <>
-                          {/* 시간 표시 */}
-                          <div className="flex-shrink-0 text-xs text-gray-500 mr-2 mt-1 w-10">
-                            {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-                          </div>
-                          
-                          {/* 발신자 아바타 */}
-                          <div className="relative w-9 h-9 rounded-full overflow-hidden flex-shrink-0 mr-2.5">
-                            {msg.avatarUrl ? (
-                              <Image
-                                src={msg.avatarUrl}
-                                alt={msg.senderName || "사용자"}
-                                fill
-                                sizes="36px"
-                                className="object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-white font-medium bg-gradient-to-br from-blue-500 to-indigo-600">
-                                {msg.senderName ? msg.senderName.charAt(0).toUpperCase() : "?"}
+                    <FaUsers className="mr-2" />
+                    참가자
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('chat')}
+                    className={`flex-1 py-3 px-4 text-sm font-medium flex justify-center items-center ${
+                      activeTab === 'chat'
+                        ? 'bg-indigo-600/60 text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-gray-700/30'
+                    }`}
+                  >
+                    <FaComments className="mr-2" />
+                    채팅
+                  </button>
+                </div>
+                
+                {/* 플레이어 목록 */}
+                <div className={`md:w-1/3 flex-shrink-0 ${activeTab !== 'players' && 'hidden md:block'}`}>
+                  <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-xl p-4 h-full">
+                    <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
+                      <FaUsers className="mr-2" />
+                      참가자 {players.length}명
+                    </h2>
+                    
+                    <div className="space-y-3 max-h-[calc(100vh-360px)] overflow-y-auto pr-1">
+                      {players.map(player => (
+                        <div 
+                          key={player._uniqueId || player.id}
+                          className={`flex items-center p-3 rounded-lg bg-gray-700/30 border border-gray-600/50 ${
+                            player.id === currentUser?.id.toString() ? 'bg-blue-900/20 border-blue-500/50' : ''
+                          }`}
+                        >
+                          <div className="relative">
+                            <img 
+                              src={player.avatarUrl || DEFAULT_AVATAR} 
+                              alt={player.nickname} 
+                              className="w-10 h-10 rounded-full"
+                            />
+                            {player.isOwner && (
+                              <div className="absolute -top-1 -right-1 bg-yellow-500 rounded-full w-5 h-5 flex items-center justify-center">
+                                <FaCrown className="text-yellow-900 text-xs" />
                               </div>
                             )}
                           </div>
-                          
-                          {/* 메시지 내용 */}
-                          <div className="flex-1">
-                            <div className="flex items-baseline">
-                              <span className="font-medium text-sm text-white mr-2">
-                                {msg.senderName || "알 수 없음"}
-                              </span>
-                              {msg.senderId && currentUserId === parseInt(msg.senderId) && (
-                                <span className="px-1.5 py-0.5 bg-blue-900/50 text-blue-400 text-xs rounded">나</span>
+                          <div className="ml-3 flex-grow">
+                            <div className="font-medium text-white flex items-center">
+                              {player.nickname}
+                              {player.id === currentUser?.id.toString() && (
+                                <span className="ml-2 text-xs text-blue-400">(나)</span>
                               )}
                             </div>
-                            <div className="text-gray-300 bg-gray-800/60 rounded-lg py-2 px-3 mt-1 break-words">
-                              {msg.content || "내용 없음"}
-                            </div>
                           </div>
-                        </>
-                      )}
+                          <div>
+                            {player.isReady ? (
+                              <div className="bg-green-600/30 text-green-400 px-2 py-1 rounded text-xs font-medium">
+                                <FaCheck className="inline-block mr-1" />
+                                준비완료
+                              </div>
+                            ) : player.isOwner ? (
+                              <div className="bg-yellow-600/30 text-yellow-400 px-2 py-1 rounded text-xs font-medium">
+                                방장
+                              </div>
+                            ) : (
+                              <div className="bg-gray-600/30 text-gray-400 px-2 py-1 rounded text-xs font-medium">
+                                대기중
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+                </div>
+                
+                {/* 채팅창 */}
+                <div className={`md:flex-1 flex flex-col ${activeTab !== 'chat' && 'hidden md:flex'}`}>
+                  <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-xl p-4 flex flex-col h-full">
+                    <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
+                      <FaComments className="mr-2" />
+                      채팅
+                    </h2>
+                    
+                    {/* 채팅 메시지 영역 */}
+                    <div 
+                      ref={chatContainerRef}
+                      className="flex-grow space-y-3 overflow-y-auto max-h-[calc(100vh-400px)] pr-1 mb-4"
+                    >
+                      {chatMessages.map((msg, index) => (
+                        <div key={index} className={`flex ${msg.type === 'SYSTEM' ? 'justify-center' : 'items-start'}`}>
+                          {msg.type === 'SYSTEM' ? (
+                            <div className="bg-gray-700/40 text-gray-300 px-3 py-1.5 rounded-md text-sm text-center max-w-[80%]">
+                              {msg.content}
+                            </div>
+                          ) : (
+                            <>
+                              <img src={msg.avatarUrl || DEFAULT_AVATAR} alt={msg.sender} className="w-8 h-8 rounded-full mr-2 mt-1" />
+                              <div className={`max-w-[70%] ${msg.sender === currentUser?.nickname ? 'bg-blue-600/40 text-blue-100' : 'bg-gray-700/60 text-white'} px-3 py-2 rounded-lg`}>
+                                <div className="text-xs text-gray-300 mb-1 flex justify-between">
+                                  <span>{msg.sender}</span>
+                                  <span className="ml-4 opacity-70">
+                                    {new Date(msg.timestamp).toLocaleTimeString('ko-KR', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                      hour12: false
+                                    })}
+                                  </span>
+                                </div>
+                                <div className="text-sm break-words">{msg.content}</div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    
+                    {/* 채팅 입력 영역 */}
+                    <div className="flex items-center">
+                      <input
+                        type="text"
+                        placeholder="메시지를 입력하세요..."
+                        className="flex-grow px-4 py-2 bg-gray-700/50 text-white rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        value={newChatMessage}
+                        onChange={(e) => setNewChatMessage(e.target.value)}
+                        onKeyDown={handleChatKeyDown}
+                        onCompositionStart={handleCompositionStart}
+                        onCompositionEnd={handleCompositionEnd}
+                      />
+                      <button
+                        className="ml-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        onClick={handleSendChatMessage}
+                      >
+                        전송
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
               
-              {/* 채팅 입력창 */}
-              <div className="flex">
-                <input
-                  type="text"
-                  value={newChatMessage}
-                  onChange={(e) => setNewChatMessage(e.target.value)}
-                  onKeyDown={handleChatKeyDown}
-                  onCompositionStart={handleCompositionStart}
-                  onCompositionEnd={handleCompositionEnd}
-                  placeholder="메시지 입력..."
-                  className="flex-1 bg-gray-900/70 text-white px-4 py-3 rounded-l-xl border border-gray-700/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-                <button
-                  onClick={handleSendChatMessage}
-                  disabled={!newChatMessage.trim()}
-                  className={`px-4 rounded-r-xl flex items-center justify-center ${
-                    newChatMessage.trim()
-                      ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                      : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                  } transition-colors`}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
+              {/* 하단 버튼 영역 */}
+              <div className="mt-5 flex justify-center">
+                {isOwner ? (
+                  // 방장이면 시작 버튼
+                  <button
+                    className={`bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white px-8 py-3 rounded-xl font-medium transition-all shadow-md ${
+                      players.filter(p => !p.isOwner).every(p => p.isReady)
+                        ? ''
+                        : 'opacity-50 cursor-not-allowed'
+                    }`}
+                    onClick={startGame}
+                    disabled={!players.filter(p => !p.isOwner).every(p => p.isReady)}
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                    />
-                  </svg>
-                </button>
+                    <FaPlay className="inline-block mr-2" />
+                    게임 시작
+                  </button>
+                ) : (
+                  // 일반 사용자면 준비 버튼
+                  <button
+                    className={`${
+                      isReady
+                        ? 'bg-green-600 hover:bg-green-700'
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    } text-white px-8 py-3 rounded-xl font-medium transition-all shadow-md`}
+                    onClick={toggleReady}
+                  >
+                    {isReady ? (
+                      <>
+                        <FaCheck className="inline-block mr-2" />
+                        준비 완료
+                      </>
+                    ) : (
+                      <>
+                        <FaBrain className="inline-block mr-2" />
+                        준비하기
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
-            </div>
-          </div>
-          
-          {/* 하단 액션 버튼 영역 */}
-          <div className="mt-5 bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-5">
-            <div className="flex justify-center space-x-4">
-              {isOwner ? (
-                <button
-                  onClick={startGame}
-                  disabled={false}
-                  className="px-8 py-4 rounded-xl font-bold flex items-center justify-center min-w-[160px] transition-all transform hover:scale-105 shadow-lg bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white shadow-green-700/30"
-                >
-                  <FaPlay className="mr-2" />
-                  게임 시작하기
-                </button>
-              ) : (
-                <button
-                  onClick={toggleReady}
-                  className={`px-8 py-4 rounded-xl font-bold flex items-center justify-center min-w-[160px] transition-all transform hover:scale-105 shadow-lg ${
-                    isReady
-                      ? 'bg-gradient-to-r from-red-500 to-pink-600 hover:from-red-600 hover:to-pink-700 text-white shadow-red-700/30'
-                      : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-blue-700/30'
-                  }`}
-                >
-                  {isReady ? (
-                    <>
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                      준비 취소
-                    </>
-                  ) : (
-                    <>
-                      <FaCheck className="mr-2" />
-                      준비하기
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-            
-            {/* 게임 시작 조건 안내 메시지 */}
-            {isOwner && (
-              <div className="mt-4 text-center text-sm text-gray-400">
-                방장은 언제든지 게임을 시작할 수 있습니다.
-              </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
       </div>
     </AppLayout>
