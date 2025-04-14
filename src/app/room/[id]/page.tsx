@@ -373,8 +373,11 @@ function RoomContent() {
           
           console.log("포맷된 플레이어 목록:", formattedPlayers);
           
-          // 상태 업데이트
-          setPlayers([...formattedPlayers]);
+          // 플레이어 목록이 변경된 경우에만 상태 업데이트 - 커스텀 비교
+          if (JSON.stringify(formattedPlayers) !== JSON.stringify(players)) {
+            console.log("플레이어 목록 변경 감지, 상태 업데이트");
+            setPlayers([...formattedPlayers]);
+          }
           
           // 자신의 준비 상태 확인
           if (currentUser) {
@@ -386,20 +389,6 @@ function RoomContent() {
               console.log("내 준비 상태 업데이트:", playerInfo.isReady);
               setIsReady(playerInfo.isReady);
             }
-          }
-          
-          // 상태가 변경된 경우에만 강제 리렌더링 
-          const hasReadyStateChanged = formattedPlayers.some((newPlayer: PlayerProfile) => {
-            const oldPlayer = players.find(p => p.id === newPlayer.id);
-            return oldPlayer && oldPlayer.isReady !== newPlayer.isReady;
-          });
-          
-          if (hasReadyStateChanged) {
-            console.log("준비 상태 변경 감지, 강제 리렌더링");
-            // 약간의 지연 후 리렌더링
-            setTimeout(() => {
-              setPlayers(prev => [...prev]);
-            }, 50);
           }
         }
         
@@ -420,6 +409,31 @@ function RoomContent() {
       } catch (error) {
         console.error("방 상태 처리 오류:", error);
       }
+    });
+    
+    // 입장/퇴장 이벤트 구독 (실시간 인원 변동 감지용)
+    subscribe(`/topic/room/${roomId}/join`, (message) => {
+      console.log("입장 이벤트 수신:", message);
+      // 상태 요청 발행 (새로운 플레이어 정보 가져오기)
+      setTimeout(() => {
+        publish(`/app/room/status/${roomId}`, {
+          type: "STATUS_REQUEST",
+          roomId: parseInt(roomId),
+          timestamp: Date.now()
+        });
+      }, 100);
+    });
+    
+    subscribe(`/topic/room/${roomId}/leave`, (message) => {
+      console.log("퇴장 이벤트 수신:", message);
+      // 상태 요청 발행 (플레이어 목록 업데이트)
+      setTimeout(() => {
+        publish(`/app/room/status/${roomId}`, {
+          type: "STATUS_REQUEST",
+          roomId: parseInt(roomId),
+          timestamp: Date.now()
+        });
+      }, 100);
     });
     
     // 채팅 메시지 구독
@@ -775,86 +789,31 @@ function RoomContent() {
     // 컴포넌트 마운트 후 방 상태 및 플레이어 목록 주기적으로 요청
     const statusInterval = setInterval(() => {
       if (isConnected && roomId && currentUser) {
-        console.log("방 상태 주기적 요청 시작");
+        console.log("방 상태 주기적 요청");
         
-        // 일반적인 방식으로 요청 - 서버에서 STATUS_RESPONSE 형태로 응답
+        // 방 상태 요청 (WebSocket)
         publish(`/app/room/status/${roomId}`, {
           type: "STATUS_REQUEST",
           roomId: parseInt(roomId),
           timestamp: Date.now()
         });
         
-        // 추가로 서버에서 방 상태 요청 API 직접 호출 - REST API로 요청
-        const fetchCurrentRoomStatus = async () => {
-          try {
-            const response = await client.GET(`/api/v1/rooms/{roomId}`, {
-              params: { path: { roomId: parseInt(roomId) } }
-            }) as ApiResponse<RoomResponse>;
-            
-            if (response.data?.data) {
-              const roomData = response.data.data;
-              console.log("방 정보 API 응답:", roomData);
-              
-              // 방 정보 업데이트 
-              setRoom(prevRoom => {
-                if (!roomData) return prevRoom;
-                
-                // 방 정보에서 플레이어 ID 목록 추출
-                if (roomData.players && roomData.players.length > 0) {
-                  // currentPlayers 값을 실제 players 배열 길이로 업데이트
-                  return {
-                    ...roomData,
-                    currentPlayers: roomData.players.length
-                  };
-                }
-                return roomData;
-              });
-              
-              // 방 정보에서 플레이어 ID 목록 추출
-              if (roomData.players && roomData.players.length > 0) {
-                console.log("방 정보에서 플레이어 목록 확인:", roomData.players);
-                
-                // 현재 플레이어 목록을 ID 기준으로 업데이트
-                setPlayers(prev => {
-                  // 이미 플레이어 목록에 있는 항목 유지
-                  const existingPlayers = prev.filter(player => 
-                    roomData.players?.includes(parseInt(player.id))
-                  );
-                  
-                  // 현재 사용자가 목록에 없으면 추가
-                  if (currentUser && 
-                      roomData.players?.includes(currentUser.id) && 
-                      !existingPlayers.some(p => p.id === currentUser.id.toString())) {
-                    existingPlayers.push({
-                      id: currentUser.id.toString(),
-                      nickname: currentUser.nickname,
-                      avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR,
-                      isOwner: roomData.ownerId === currentUser.id,
-                      isReady: false
-                    });
-                  }
-                  
-                  console.log("업데이트된 플레이어 목록:", existingPlayers);
-                  return existingPlayers;
-                });
-              }
+        // REST API를 통한 방 상태 요청 추가 (백업)
+        if (!isWebSocketConnected()) {
+          console.log("웹소켓 연결 안됨, API로 상태 요청");
+          fetchRoomData().then(roomData => {
+            if (roomData) {
+              console.log("API로 가져온 방 정보:", roomData);
             }
-          } catch (error) {
-            console.error("방 상태 API 요청 실패:", error);
-          }
-        };
-        
-        // API로 상태 요청 (WebSocket이 안되는 경우 대비)
-        fetchCurrentRoomStatus();
-        
-        console.log("방 상태 및 플레이어 목록 요청 발송");
+          });
+        }
       }
-    }, 3000); // 3초마다 요청
+    }, 2000); // 2초마다 요청 (로비와 동일하게 빈도 조정)
     
     return () => {
       clearInterval(statusInterval);
     };
-  }, [roomId, isConnected, currentUser]);
+  }, [roomId, isConnected, currentUser, publish, fetchRoomData, isWebSocketConnected]);
   
   // 채팅 메시지 디버깅용 효과
   useEffect(() => {
@@ -881,6 +840,34 @@ function RoomContent() {
       }
     }
   }, [players, currentUser, isReady]);
+  
+  // 플레이어 목록 변경 감지
+  useEffect(() => {
+    console.log("플레이어 목록 변경 감지:", players.length);
+    
+    // 자신이 목록에 있는지 확인
+    if (currentUser && players.length > 0) {
+      const myPlayer = players.find(p => String(p.id) === String(currentUser.id));
+      if (!myPlayer) {
+        console.log("경고: 내가 플레이어 목록에 없음, 상태 요청");
+        // 상태 요청 발행
+        publish(`/app/room/status/${roomId}`, {
+          type: "STATUS_REQUEST",
+          roomId: parseInt(roomId),
+          timestamp: Date.now()
+        });
+      }
+    }
+    
+    // 방 객체가 있고 플레이어 목록이 있는 경우 방의 currentPlayers 업데이트
+    if (room && room.currentPlayers !== players.length) {
+      console.log(`방 정보 플레이어 수 업데이트: ${room.currentPlayers} -> ${players.length}`);
+      setRoom(prev => {
+        if (!prev) return prev;
+        return { ...prev, currentPlayers: players.length };
+      });
+    }
+  }, [players, currentUser, room, roomId, publish]);
   
   // 컴포넌트 초기화 useEffect (가장 중요한 효과, 맨 뒤에 위치해야 함)
   useEffect(() => {
@@ -1193,3 +1180,4 @@ export default function RoomPage() {
     </AppLayout>
   );
 }
+
