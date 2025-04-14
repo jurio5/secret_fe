@@ -100,8 +100,8 @@ function RoomContent() {
   // 방 정보 가져오기
   const fetchRoomData = async () => {
     try {
-      // 상대 경로로 API 호출
-      const response = await fetch(`/api/v1/rooms/${roomId}`, {
+      // 백엔드 URL을 직접 지정하여 API 호출
+      const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}`, {
         method: 'GET',
         credentials: 'include',
         headers: {
@@ -136,15 +136,24 @@ function RoomContent() {
   // 현재 사용자 정보 가져오기
   const fetchCurrentUser = async () => {
     try {
-      const response = await client.GET("/api/v1/members/me") as ApiResponse<User>;
+      // 백엔드 URL 직접 지정
+      const response = await fetch("https://quizzle.p-e.kr/api/v1/members/me", {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
       
-      if (response.error) {
-        console.error("사용자 정보를 가져오는데 실패했습니다:", response.error);
+      if (!response.ok) {
+        console.error("사용자 정보를 가져오는데 실패했습니다:", response.statusText);
         return null;
       }
       
-      if (response.data?.data) {
-        const userData = response.data.data;
+      const responseData = await response.json();
+      
+      if (responseData.data) {
+        const userData = responseData.data;
         setCurrentUser(userData);
         
         // 방장 여부 확인
@@ -197,7 +206,8 @@ function RoomContent() {
             // 약간의 지연 후 API로 방 정보 갱신 (서버 처리 시간 고려)
             setTimeout(async () => {
               try {
-                const response = await fetch(`/api/v1/rooms/${roomId}`, {
+                // 백엔드 URL을 직접 지정하여 API 호출
+                const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}`, {
                   method: 'GET',
                   credentials: 'include',
                   headers: {
@@ -543,8 +553,8 @@ function RoomContent() {
         await new Promise(resolve => setTimeout(resolve, 300));
       }
       
-      // 방 입장 API 호출 - fetch 사용
-      const response = await fetch(`/api/v1/rooms/${roomId}/join`, {
+      // 방 입장 API 호출 - 백엔드 URL 직접 지정
+      const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}/join`, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -619,8 +629,8 @@ function RoomContent() {
     try {
       console.log("방 나가기 시도:", roomId, currentUser);
       
-      // 방 나가기 API 호출 - fetch 사용
-      const response = await fetch(`/api/v1/rooms/${roomId}/leave`, {
+      // 방 나가기 API 호출 - 백엔드 URL 직접 지정
+      const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}/leave`, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -729,8 +739,8 @@ function RoomContent() {
         return updated;
       });
       
-      // 준비 상태 변경 API 호출 - fetch 사용
-      const response = await fetch(`/api/v1/rooms/${roomId}/ready`, {
+      // 준비 상태 변경 API 호출 - 백엔드 URL 직접 지정
+      const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}/ready`, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -827,8 +837,8 @@ function RoomContent() {
     }
     
     try {
-      // 게임 시작 API 호출 - fetch 사용
-      const response = await fetch(`/api/v1/rooms/${roomId}/start`, {
+      // 게임 시작 API 호출 - 백엔드 URL 직접 지정
+      const response = await fetch(`https://quizzle.p-e.kr/api/v1/rooms/${roomId}/start`, {
         method: 'POST',
         credentials: 'include',
         headers: {
