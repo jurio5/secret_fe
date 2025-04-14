@@ -5,21 +5,21 @@ import { useState, useEffect } from "react";
 interface TimerProps {
   initialTime: number;
   onExpire: () => void;
-  showResults: boolean;
+  show: boolean;
 }
 
-export default function Timer({ initialTime, onExpire, showResults }: TimerProps) {
+export default function Timer({ initialTime, onExpire, show }: TimerProps) {
   const [timeLeft, setTimeLeft] = useState<number>(initialTime);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   
-  // 결과 화면에서는 타이머 일시 정지
+  // 타이머 표시 여부에 따라 일시 정지
   useEffect(() => {
-    if (showResults) {
+    if (!show) {
       setIsPaused(true);
     } else {
       setIsPaused(false);
     }
-  }, [showResults]);
+  }, [show]);
   
   // 초기 시간이 변경되면 타이머 재설정
   useEffect(() => {
