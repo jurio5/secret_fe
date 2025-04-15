@@ -13,21 +13,20 @@ export default function Timer({ initialTime, onExpire, show }: TimerProps) {
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const hasExpiredRef = useRef<boolean>(false);
   
-  // 타이머 표시 여부에 따라 일시 정지
+  // 타이머 표시 여부에 따라 일시 정지 (show가 true면 타이머를 계속 실행, false면 일시 정지)
   useEffect(() => {
-    if (!show) {
-      setIsPaused(true);
-    } else {
-      setIsPaused(false);
-    }
+    setIsPaused(!show);
   }, [show]);
   
   // 초기 시간이 변경되면 타이머 재설정
   useEffect(() => {
+    console.log("Timer: initialTime 변경됨", initialTime);
     setTimeLeft(initialTime);
-    setIsPaused(false);
     hasExpiredRef.current = false;
-  }, [initialTime]);
+    
+    // show가 true인 경우만 타이머 시작, 아니면 일시 정지
+    setIsPaused(!show);
+  }, [initialTime, show]);
   
   // 타이머 카운트다운
   useEffect(() => {
