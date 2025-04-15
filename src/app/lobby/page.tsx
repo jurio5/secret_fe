@@ -10,6 +10,7 @@ import { FaTrophy, FaUserFriends, FaUser, FaComments } from "react-icons/fa";
 import { useRouter } from "next/navigation";
 import FriendModal from '@/components/friend/FriendModal';
 import RankingModal from '@/components/ranking/RankingModal';
+import { updateOnlineUserIds } from '@/components/friend/friendApi';
 
 interface User {
   id: number;
@@ -632,6 +633,10 @@ function LobbyContent({
               
               // 로비 접속자 목록 구독
               subscribe("/topic/lobby/users", async (data: User[]) => {
+                // 온라인 사용자 ID 목록 추출 및 업데이트
+                const onlineUserIds = data.map(user => user.id);
+                updateOnlineUserIds(onlineUserIds);
+                
                 // 아바타 정보 추가
                 const usersWithAvatars = await fetchUserAvatars(data);
                 
@@ -733,6 +738,10 @@ function LobbyContent({
 
     // 로비 접속자 목록 구독
     subscribe("/topic/lobby/users", async (data: User[]) => {
+      // 온라인 사용자 ID 목록 추출 및 업데이트
+      const onlineUserIds = data.map(user => user.id);
+      updateOnlineUserIds(onlineUserIds);
+      
       // 아바타 정보 추가
       const usersWithAvatars = await fetchUserAvatars(data);
       

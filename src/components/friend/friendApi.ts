@@ -8,37 +8,54 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_WAS_HOST || 'https://quizzle.p-e.kr
 // 기본 아바타 URL
 const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';
 
-// 친구 온라인 상태 캐시 (세션 내에서 일관성 유지를 위함)
-const getFriendOnlineStatusFromStorage = (memberId: number): boolean | undefined => {
+// 친구 온라인 상태 관리를 위한 WebSocket 기반 시스템
+// 전역 온라인 사용자 ID 저장소
+let onlineUserIds: Set<number> = new Set();
+
+// WebSocket 이벤트에서 호출되는 함수로, 온라인 사용자 목록 업데이트
+export const updateOnlineUserIds = (userIds: number[]) => {
+  onlineUserIds = new Set(userIds);
+  // 변경 사항 로컬 스토리지에 저장 (페이지 리로드 시 유지를 위해)
   try {
-    const storageKey = 'friend_online_status';
-    const storedStatus = localStorage.getItem(storageKey);
-    if (storedStatus) {
-      const statusData = JSON.parse(storedStatus);
-      return statusData[memberId];
-    }
-    return undefined;
+    localStorage.setItem('online_users', JSON.stringify(Array.from(onlineUserIds)));
   } catch (error) {
-    console.error('온라인 상태 불러오기 실패:', error);
-    return undefined;
+    console.error('온라인 사용자 저장 실패:', error);
   }
 };
 
-const saveFriendOnlineStatusToStorage = (memberId: number, isOnline: boolean): void => {
-  try {
-    const storageKey = 'friend_online_status';
-    let statusData: Record<number, boolean> = {};
-    
-    const storedStatus = localStorage.getItem(storageKey);
-    if (storedStatus) {
-      statusData = JSON.parse(storedStatus);
-    }
-    
-    statusData[memberId] = isOnline;
-    localStorage.setItem(storageKey, JSON.stringify(statusData));
-  } catch (error) {
-    console.error('온라인 상태 저장 실패:', error);
+// 단일 사용자 온라인 상태 업데이트
+export const updateUserOnlineStatus = (userId: number, isOnline: boolean) => {
+  if (isOnline) {
+    onlineUserIds.add(userId);
+  } else {
+    onlineUserIds.delete(userId);
   }
+  
+  // 로컬 스토리지 업데이트
+  try {
+    localStorage.setItem('online_users', JSON.stringify(Array.from(onlineUserIds)));
+  } catch (error) {
+    console.error('온라인 사용자 저장 실패:', error);
+  }
+};
+
+// 로컬 스토리지에서 온라인 사용자 상태 초기화 (앱 시작 시)
+export const initializeOnlineUsers = () => {
+  try {
+    const storedUsers = localStorage.getItem('online_users');
+    if (storedUsers) {
+      onlineUserIds = new Set(JSON.parse(storedUsers));
+      console.log('온라인 사용자 상태 초기화 완료:', onlineUserIds.size);
+    }
+  } catch (error) {
+    console.error('온라인 사용자 초기화 실패:', error);
+    onlineUserIds = new Set();
+  }
+};
+
+// 사용자 온라인 상태 확인
+export const isUserOnline = (userId: number): boolean => {
+  return onlineUserIds.has(userId);
 };
 
 // 현재 로그인한 사용자 정보 가져오기
@@ -71,19 +88,18 @@ export const getFriendList = async (): Promise<Friend[]> => {
       )
     );
     
-    // API 응답 데이터 (실제 백엔드에서 데이터가 올바르게 오지 않는 경우에 대비한 가공 처리)
+    // API 응답 데이터
     let friends = (response.data?.data || []) as Friend[];
     
-    // 데이터 가공: 아바타 URL이 없거나 온라인 상태가 없는 경우 모킹 데이터로 강화
+    // 온라인 상태 초기화 호출 (필요 시)
+    if (onlineUserIds.size === 0) {
+      initializeOnlineUsers();
+    }
+    
+    // 데이터 가공: WebSocket 기반 온라인 상태 적용
     friends = friends.map(friend => {
-      // 로컬 스토리지에서 상태 불러오기
-      let isOnline = getFriendOnlineStatusFromStorage(friend.memberId);
-      
-      // 상태가 없는 경우 랜덤 생성 및 저장
-      if (isOnline === undefined) {
-        isOnline = Math.random() > 0.5;
-        saveFriendOnlineStatusToStorage(friend.memberId, isOnline);
-      }
+      // WebSocket 기반 온라인 상태 확인
+      const isOnline = isUserOnline(friend.memberId);
       
       // 아바타 URL이 없는 경우 기본 아바타 제공
       const avatarUrl = friend.avatarUrl || DEFAULT_AVATAR;
@@ -95,7 +111,7 @@ export const getFriendList = async (): Promise<Friend[]> => {
       };
     });
     
-    console.log('친구 목록 데이터 (강화됨):', friends);
+    console.log('친구 목록 데이터 (WebSocket 온라인 상태):', friends);
     return friends;
   } catch (error) {
     console.error("친구 목록을 불러오는데 실패했습니다:", error);

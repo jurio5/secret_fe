@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
 import AppLayout from "@/components/common/AppLayout";
 import client from "@/lib/backend/client";
 import { subscribe, unsubscribe, publish } from "@/lib/backend/stompClient";
@@ -9,6 +9,8 @@ import { components } from "@/lib/backend/apiV1/schema";
 import Image from "next/image";
 import { FaChevronLeft, FaDoorOpen, FaCrown, FaCheck, FaComments, FaUsers, FaInfoCircle, FaPlay, FaBrain, FaList, FaQuestionCircle } from "react-icons/fa";
 import GameContainer from "@/components/game/GameContainer";
+import { useSearchParams } from "next/navigation";
+import { updateOnlineUserIds } from '@/components/friend/friendApi';
 // 방 정보 타입
 type RoomResponse = components["schemas"]["RoomResponse"] & {
   // 추가 필드
@@ -449,9 +451,11 @@ export default function RoomPage() {
       }
     });
     
-    // 로비 사용자 목록 구독 추가
+    // 로비 유저 목록 구독 - 게임 내에서도 온라인 상태 유지
     subscribe("/topic/lobby/users", (data) => {
-      // 방 페이지에서는 처리할 필요 없지만 구독은 유지
+      // 온라인 사용자 ID 목록 추출 및 업데이트
+      const onlineUserIds = data.map((user: any) => user.id);
+      updateOnlineUserIds(onlineUserIds);
     });
     
     // 로비 상태 업데이트 구독 추가
