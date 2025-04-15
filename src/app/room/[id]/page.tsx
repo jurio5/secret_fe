@@ -520,14 +520,20 @@ export default function RoomPage() {
     
     // 로비 유저 목록 구독 - 게임 내에서도 온라인 상태 유지
     subscribe("/topic/lobby/users", (data) => {
-      // 온라인 사용자 ID 목록 추출 및 업데이트
-      const onlineUserIds = data.map((user: any) => user.id);
-      updateOnlineUserIds(onlineUserIds);
+      // 게임방에 있는 경우에는 상태 업데이트를 무시
+      console.log("로비 유저 목록 업데이트 수신 (무시됨)");
+      
+      // 온라인 상태만 업데이트하고 위치 정보는 변경하지 않음
+      if (Array.isArray(data)) {
+        const onlineUserIds = data.map((user: any) => user.id);
+        updateOnlineUserIds(onlineUserIds);
+      }
     });
     
     // 로비 상태 업데이트 구독 추가
     subscribe("/topic/lobby/status", (data) => {
-      // 방 페이지에서는 처리할 필요 없지만 구독은 유지
+      // 게임방에 있는 경우에는 로비 상태 업데이트를 무시
+      console.log("로비 상태 업데이트 수신 (무시됨)");
     });
     
     // 방 상태 구독 추가 - 다른 사용자들의 상태 변화를 수신
@@ -818,8 +824,22 @@ export default function RoomPage() {
             status: `게임방 ${roomId}번 입장`,
             location: "IN_ROOM",
             roomId: parseInt(roomId),
+            userId: userData.id,
+            nickname: userData.nickname,
             timestamp: Date.now()
           });
+          
+          // 모든 사용자에게 자신이 방에 있음을 알림
+          setTimeout(() => {
+            publish(`/app/lobby/broadcast`, {
+              type: "USER_LOCATION_UPDATE",
+              userId: userData.id,
+              nickname: userData.nickname,
+              location: "IN_ROOM",
+              roomId: parseInt(roomId),
+              timestamp: Date.now()
+            });
+          }, 500);
           
           // 플레이어 목록 설정
           setPlayers(prevPlayers => {
