@@ -1058,6 +1058,51 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         timestamp: Date.now()
       });
       
+      // 퀴즈 결과 API 호출하여 경험치 업데이트
+      try {
+        // 현재 플레이어의 점수를 경험치로 변환
+        const currentPlayer = playerScores.find(p => p.id === currentUserId.toString());
+        if (currentPlayer && quizId) {
+          console.log("경험치 업데이트 요청 - 퀴즈 ID:", quizId, "점수:", currentPlayer.score);
+          
+          // fetch로 직접 API 호출
+          const baseUrl = process.env.NEXT_PUBLIC_WAS_HOST || 'https://quizzle.p-e.kr';
+          const response = await fetch(`${baseUrl}/api/v1/quiz/${quizId}/result`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+              score: currentPlayer.score
+            })
+          });
+          
+          if (response.ok) {
+            // 204 상태코드(NO_CONTENT)인 경우 응답 본문이 없으므로 JSON 파싱을 시도하지 않음
+            let data;
+            if (response.status !== 204) {
+              data = await response.json();
+              console.log("경험치 업데이트 성공:", data);
+            } else {
+              console.log("경험치 업데이트 성공 (No Content)");
+            }
+            
+            // 성공 메시지를 토스트로 표시
+            toast.success(`${currentPlayer.score}점이 경험치로 추가되었습니다!`, {
+              duration: 3000,
+              icon: '✨'
+            });
+          } else {
+            console.error("경험치 업데이트 실패:", response.statusText);
+            toast.error(`경험치 업데이트에 실패했습니다`);
+          }
+        }
+      } catch (error) {
+        console.error("경험치 업데이트 중 오류 발생:", error);
+        toast.error(`경험치 업데이트 중 오류가 발생했습니다`);
+      }
+      
       console.log("게임 종료 처리 완료");
     } catch (error) {
       console.error("게임 종료 처리 중 오류 발생:", error);
@@ -1665,7 +1710,22 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         <div className="mt-6 flex justify-center">
           <button 
             className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-3 rounded-xl font-medium shadow-lg flex items-center gap-2 transition-all hover:scale-105"
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              // 현재 사용자의 점수 확인
+              const currentPlayer = playerScores.find(p => p.id === currentUserId.toString());
+              if (currentPlayer) {
+                // 점수 획득 메시지 표시
+                toast.success(`획득한 ${currentPlayer.score}점이 경험치로 추가되었습니다!`, {
+                  duration: 2000,
+                  icon: '✨'
+                });
+              }
+              
+              // 약간의 지연 후 새로고침
+              setTimeout(() => {
+                window.location.reload();
+              }, 500);
+            }}
           >
             <FaHome className="text-lg" />
             대기실로 돌아가기
