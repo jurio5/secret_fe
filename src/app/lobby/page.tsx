@@ -878,32 +878,10 @@ function LobbyContent({
     setNewChatMessage("");
     
     try {
-      // 안전한 구독 및 발행 함수 사용
-      const { safeSubscribe, safePublish } = await import('@/lib/backend/stompClient');
+      // 안전한 발행 함수 사용
+      const { safePublish } = await import('@/lib/backend/stompClient');
       
-      // 로비 채팅 채널 구독 확인
-      console.log("[CHAT] 메시지 전송 전 로비 채팅 구독 확인");
-      await safeSubscribe("/topic/lobby/chat", (chatMsg) => {
-        console.log("[CHAT] 로비 채팅 메시지 수신:", chatMsg);
-        if (chatMsg.type === "CHAT" || (!chatMsg.type && chatMsg.content)) {
-          // 중복 메시지 검사
-          const isDuplicate = chatMessages.some(existingMsg => 
-            existingMsg.timestamp === chatMsg.timestamp && 
-            existingMsg.senderId === chatMsg.senderId && 
-            existingMsg.content === chatMsg.content
-          );
-          
-          if (isDuplicate) {
-            console.log("중복 메시지 무시:", chatMsg);
-            return;
-          }
-          
-          // 메시지 처리
-          receiveMessage(chatMsg);
-        }
-      });
-      
-      // 안전한 발행 함수를 사용하여 메시지 전송
+      // 안전한 발행 함수를 사용하여 메시지 전송 (구독 부분 제거)
       console.log(`[CHAT] 채팅 메시지 전송: "${messageContent}"`);
       const published = await safePublish("/app/lobby/chat", messageContent);
       
@@ -1164,6 +1142,14 @@ function LobbyContent({
   const receiveMessage = (message: any) => {
     // 채팅 메시지인 경우
     if (message.type === "CHAT" || (!message.type && message.content)) {
+      // 메시지 내용에서 불필요한 따옴표 제거
+      if (message.content && typeof message.content === 'string') {
+        // 앞뒤 따옴표로 감싸져 있는 경우 제거
+        if (message.content.startsWith('"') && message.content.endsWith('"')) {
+          message.content = message.content.substring(1, message.content.length - 1);
+        }
+      }
+      
       // 사용자 프로필 정보 확인 및 아바타 URL 가져오기
       let avatarUrl = undefined;
       
@@ -1423,6 +1409,25 @@ const initializeWebSocket = async () => {
     console.log("[INIT] 안전 구독 시작 - 로비 채팅");
     await safeSubscribe("/topic/lobby/chat", (chatMessage) => {
       console.log("[CHAT] 로비 채팅 메시지 수신:", chatMessage);
+      
+      // 메시지 타입 확인 및 중복 메시지 검사
+      if (chatMessage && 
+          (chatMessage.type === "CHAT" || (!chatMessage.type && chatMessage.content))) {
+        
+        // 중복 메시지 검사 - receiveMessage 내부로 이동
+        const isDuplicate = chatMessages.some(existingMsg => 
+          existingMsg.timestamp === chatMessage.timestamp && 
+          existingMsg.senderId === chatMessage.senderId && 
+          existingMsg.content === chatMessage.content
+        );
+        
+        if (isDuplicate) {
+          console.log("[CHAT] 중복 메시지 무시:", chatMessage);
+          return;
+        }
+      }
+      
+      // 중복 검사를 통과한 메시지만 처리
       receiveMessage(chatMessage);
     });
     
@@ -1564,68 +1569,6 @@ const initializeWebSocket = async () => {
     }
   }, [currentUser]);
 
-  // 로비 채팅 구독을 위한 별도의 useEffect 추가
-  useEffect(() => {
-    if (!isConnected) return;
-    
-    console.log("로비 채팅 구독 시도: /topic/lobby/chat");
-    
-    // 명시적 구독
-    subscribe("/topic/lobby/chat", (msg) => {
-      console.log("로비 채팅 메시지 수신:", msg);
-      
-      // 메시지 타입과 내용이 있는 경우에만 처리
-      if (msg && (msg.type === "CHAT" || (!msg.type && msg.content))) {
-        // 중복 메시지 검사
-        const isDuplicate = chatMessages.some(existingMsg => 
-          existingMsg.timestamp === msg.timestamp && 
-          existingMsg.senderId === msg.senderId && 
-          existingMsg.content === msg.content
-        );
-        
-        if (isDuplicate) {
-          console.log("중복 메시지 무시:", msg);
-          return;
-        }
-        
-        // 메시지 처리 로직
-        let avatarUrl = undefined;
-        
-        if (msg.senderId && msg.senderId !== "system") {
-          const senderId = parseInt(msg.senderId);
-          avatarUrl = userProfileCache[senderId]?.avatarUrl || DEFAULT_AVATAR;
-        }
-        
-        // 메시지에 고유 ID 추가
-        const messageWithId = {
-          ...msg,
-          id: `${msg.senderId}-${msg.timestamp}-${Math.random().toString(36).substr(2, 5)}`,
-          avatarUrl: avatarUrl || DEFAULT_AVATAR
-        };
-        
-        // 메시지 추가
-        setChatMessages((prevMessages) => {
-          const newMessages = [...prevMessages, messageWithId];
-          
-          // 메시지 최대 개수 제한
-          const maxMessages = 100;
-          const trimmedMessages = newMessages.length > maxMessages 
-            ? newMessages.slice(newMessages.length - maxMessages) 
-            : newMessages;
-          
-          // 글로벌 캐시 업데이트
-          lobbyMessageCache = [...trimmedMessages];
-          
-          return trimmedMessages;
-        });
-      }
-    });
-    
-    return () => {
-      unsubscribe("/topic/lobby/chat");
-    };
-  }, [isConnected]); // 연결 상태 변경 시에만 실행
-
   // 웹소켓 연결 상태를 주기적으로 확인하는 useEffect 추가
   useEffect(() => {
     if (!currentUser) return; // 로그인된 사용자만 확인
@@ -1665,6 +1608,24 @@ const initializeWebSocket = async () => {
             // 모든 주요 채널 재구독
             await safeSubscribe("/topic/lobby/chat", (chatMsg) => {
               console.log("[CHAT] 로비 채팅 메시지 수신:", chatMsg);
+              
+              // 중복 메시지 검사 추가
+              if (chatMsg && 
+                  (chatMsg.type === "CHAT" || (!chatMsg.type && chatMsg.content))) {
+                
+                // 중복 메시지 검사 
+                const isDuplicate = chatMessages.some(existingMsg => 
+                  existingMsg.timestamp === chatMsg.timestamp && 
+                  existingMsg.senderId === chatMsg.senderId && 
+                  existingMsg.content === chatMsg.content
+                );
+                
+                if (isDuplicate) {
+                  console.log("[CHAT] 중복 메시지 무시:", chatMsg);
+                  return;
+                }
+              }
+              
               receiveMessage(chatMsg);
             });
             
@@ -1712,7 +1673,7 @@ const initializeWebSocket = async () => {
     return () => {
       clearInterval(checkConnectionInterval);
     };
-  }, [currentUser]);
+  }, [currentUser, chatMessages]);
 
   return (
     <div className="container mx-auto px-4 py-8 flex flex-col h-full">
