@@ -1597,6 +1597,26 @@ const initializeWebSocket = async () => {
     setIsJoiningRoom(true);
     
     try {
+      // 선택한 방 정보 찾기
+      const selectedRoom = rooms.find(room => room.id === parseInt(roomId));
+      
+      // 방 정원 확인
+      if (selectedRoom) {
+        const currentParticipants = selectedRoom.currentParticipants || selectedRoom.currentPlayers || 0;
+        const maxParticipants = selectedRoom.maxParticipants || selectedRoom.capacity || 5;
+        
+        if (currentParticipants >= maxParticipants) {
+          // 방이 가득 찼으면 알림 표시 후 함수 종료
+          setToast({
+            type: "error",
+            message: "방이 이미 가득 찼습니다.",
+            duration: 3000
+          });
+          setIsJoiningRoom(false);
+          return;
+        }
+      }
+      
       if (password) {
         // 비공개 방인 경우
         await client.POST(`/api/v1/rooms/{roomId}/join`, {
