@@ -180,140 +180,6 @@ export default function RoomPage() {
     }
   };
 
-  // 웹소켓 구독 설정 및 방 입장 순서 제어
-  useEffect(() => {
-    // 웹소켓 구독 설정 (페이지 진입 시 가장 먼저 실행)
-    setupWebSocket();
-    
-    // 상태 복원을 위해 저장된 사용자 방 상태 확인
-    const savedRoomState = localStorage.getItem('user_room_state');
-    if (savedRoomState) {
-      try {
-        const parsedState = JSON.parse(savedRoomState);
-        console.log("저장된 방 상태 정보 발견:", parsedState);
-        
-        // 상태 정보가 현재 방과 일치하는지 확인
-        if (parsedState.roomId === parseInt(params.id as string)) {
-          console.log("현재 방과 일치하는 상태 정보 복원");
-          
-          // 사용자 상태를 명시적으로 로비에 알림 (방금 들어왔다는 의미)
-          setTimeout(async () => {
-            // STOMP 클라이언트가 로드되고 연결될 때까지 대기
-            const { safePublish } = await import('@/lib/backend/stompClient');
-            
-            // 로비에 상태 업데이트 전송 (여러 채널에 전송하여 확실히 알림)
-            const channels = [
-              '/app/lobby/users/update',
-              '/app/lobby/status',
-              '/app/lobby/broadcast'
-            ];
-            
-            // 현재 사용자 정보가 있으면 상태 알림
-            if (currentUser) {
-              const userStatusUpdate = {
-                type: "USER_LOCATION_UPDATE",
-                status: "대기중",
-                location: "IN_ROOM",
-                roomId: parseInt(params.id as string),
-                userId: currentUser.id,
-                nickname: currentUser.nickname,
-                senderId: currentUser.id.toString(),
-                senderName: currentUser.nickname,
-                timestamp: Date.now()
-              };
-              
-              // 모든 채널에 상태 메시지 발행
-              for (const channel of channels) {
-                await safePublish(channel, userStatusUpdate);
-                console.log(`사용자 상태 메시지 발행: ${channel}`, userStatusUpdate);
-              }
-            }
-          }, 1000); // 1초 지연 (다른 초기화 작업 완료 대기)
-        }
-      } catch (error) {
-        console.error("저장된 방 상태 정보 파싱 실패:", error);
-      }
-    }
-    
-    // 방 정보와 사용자 정보를 순차적으로 로드
-    const loadData = async () => {
-      try {
-        console.log("페이지 로드 - 데이터 초기화 시작");
-        
-        // 방 정보 로드
-        await fetchRoomData();
-        console.log("방 정보 로드 완료");
-        
-        // 사용자 정보 로드 및 반환값 저장
-        const userData = await fetchCurrentUser();
-        
-        // 사용자 정보가 없으면 재시도 또는 에러 처리
-        if (!userData) {
-          console.log("사용자 정보 로드 실패, 3초 후 재시도...");
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          const retryData = await fetchCurrentUser();
-          
-          if (!retryData) {
-            console.error("사용자 정보를 가져오지 못했습니다. 로비로 돌아갑니다.");
-            window.location.href = "/lobby";
-            return;
-          }
-        }
-        
-        // 방 입장 시 사용자 상태 업데이트
-        if (userData) {
-          const userStatusUpdate = {
-            type: "USER_LOCATION_UPDATE",
-            status: "대기중",
-            location: "IN_ROOM",
-            roomId: parseInt(params.id as string),
-            userId: userData.id,
-            nickname: userData.nickname,
-            senderId: userData.id.toString(),
-            senderName: userData.nickname,
-            timestamp: Date.now()
-          };
-          
-          // 로비에 상태 업데이트 전송 (여러 채널에 전송하여 확실히 알림)
-          const channels = [
-            '/app/lobby/users/update',
-            '/app/lobby/status',
-            '/app/lobby/broadcast'
-          ];
-          
-          for (const channel of channels) {
-            publish(channel, userStatusUpdate);
-            console.log(`사용자 상태 메시지 발행: ${channel}`, userStatusUpdate);
-          }
-          
-          // 로컬 스토리지에 상태 정보 저장
-          localStorage.setItem('user_room_state', JSON.stringify(userStatusUpdate));
-        }
-        
-        // 방 입장 후 상태 동기화를 위해 딜레이 추가
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // 방 상태 브로드캐스트
-        broadcastRoomStatus();
-      } catch (error) {
-        console.error("데이터 초기화 중 오류 발생:", error);
-      }
-    };
-    
-    loadData();
-    
-    // 컴포넌트 언마운트 시 구독 해제
-    return () => {
-      unsubscribe(`/topic/room/${roomId}`);
-      unsubscribe(`/topic/room/${roomId}/owner/change`);
-      unsubscribe(`/topic/room/chat/${roomId}`);
-      unsubscribe(`/topic/lobby/users`);
-      unsubscribe(`/topic/lobby/status`);
-      unsubscribe(`/topic/lobby`);
-      unsubscribe(`/topic/room/${roomId}/status`);
-    };
-  }, [roomId, currentUser]);
-
   // 웹소켓 구독 설정
   const setupWebSocket = () => {
     // 방 정보 업데이트 구독
@@ -753,99 +619,19 @@ export default function RoomPage() {
     // 로비 유저 목록 구독 - 게임 내에서도 온라인 상태 유지
     subscribe("/topic/lobby/users", (data) => {
       // 게임방에 있는 경우에는 상태 업데이트를 무시
-      console.log("로비 유저 목록 업데이트 수신 (방 상태 유지)");
+      console.log("로비 유저 목록 업데이트 수신 (무시됨)");
       
       // 온라인 상태만 업데이트하고 위치 정보는 변경하지 않음
       if (Array.isArray(data)) {
         const onlineUserIds = data.map((user: any) => user.id);
         updateOnlineUserIds(onlineUserIds);
-        
-        // 모든 플레이어의 방 상태를 명시적으로 유지
-        if (currentUser && players.length > 0 && room) {
-          // 방 상태 유지를 위한 상태 업데이트 메시지 발행
-          players.forEach(player => {
-            const currentStatus = room.status === 'IN_GAME' ? "게임중" : "대기중";
-            
-            const playerStatusUpdate = {
-              type: "USER_LOCATION_UPDATE",
-              status: currentStatus,
-              location: "IN_ROOM",
-              roomId: parseInt(params.id as string),
-              userId: parseInt(player.id),
-              nickname: player.nickname || player.name,
-              senderId: player.id,
-              senderName: player.nickname || player.name,
-              timestamp: Date.now()
-            };
-            
-            // 로비 채널에 위치 정보 유지 메시지 전송
-            publish(`/app/lobby/users/update`, playerStatusUpdate);
-          });
-          
-          console.log("방에 있는 모든 플레이어의 위치 정보 유지 메시지 전송 완료");
-        }
       }
     });
     
     // 로비 상태 업데이트 구독 추가
     subscribe("/topic/lobby/status", (data) => {
-      // 게임방에 있는 경우에는 로비 상태 업데이트를 처리하되, 방 위치 정보는 유지
-      console.log("로비 상태 업데이트 수신 (방 상태 유지)");
-      
-      // 현재 방의 사용자 상태를 다시 알림
-      if (currentUser && room) {
-        const currentStatus = room.status === 'IN_GAME' ? "게임중" : "대기중";
-        
-        // 자신의 상태 업데이트 메시지 발행 (1초 지연)
-        setTimeout(() => {
-          const statusUpdate = {
-            type: "USER_LOCATION_UPDATE",
-            status: currentStatus,
-            location: "IN_ROOM",
-            roomId: parseInt(params.id as string),
-            userId: currentUser.id,
-            nickname: currentUser.nickname,
-            senderId: currentUser.id.toString(),
-            senderName: currentUser.nickname,
-            timestamp: Date.now()
-          };
-          
-          publish(`/app/lobby/users/update`, statusUpdate);
-          console.log("사용자 위치 정보 유지 메시지 전송:", statusUpdate);
-        }, 1000);
-      }
-    });
-    
-    // 로비 구독 추가
-    subscribe("/topic/lobby", (data) => {
-      console.log("로비 업데이트 수신:", data);
-      
-      // ROOM_UPDATED 메시지 처리
-      if (data && (data === "ROOM_UPDATED" || 
-          (typeof data === 'string' && data.startsWith("ROOM_UPDATED:")) || 
-          (typeof data === 'object' && data.type === "ROOM_UPDATED"))) {
-        
-        try {
-          // 현재 방 관련 업데이트 처리
-          let roomIdFromMessage;
-          
-          if (typeof data === 'string' && data.startsWith("ROOM_UPDATED:")) {
-            roomIdFromMessage = parseInt(data.split(":")[1]);
-          } else if (typeof data === 'object' && data.roomId) {
-            roomIdFromMessage = data.roomId;
-          } else if (typeof data === 'object' && data.id) {
-            roomIdFromMessage = data.id;
-          }
-          
-          // 현재 방에 대한 업데이트인 경우에만 처리
-          if (roomIdFromMessage === parseInt(roomId)) {
-            console.log(`현재 방(${roomId}) 상태 업데이트 받음, 방 정보 다시 불러오기`);
-            fetchRoomData();
-          }
-        } catch (error) {
-          console.error("로비 메시지 처리 중 오류:", error);
-        }
-      }
+      // 게임방에 있는 경우에는 로비 상태 업데이트를 무시
+      console.log("로비 상태 업데이트 수신 (무시됨)");
     });
     
     // 방 상태 구독 추가 - 다른 사용자들의 상태 변화를 수신
@@ -881,8 +667,158 @@ export default function RoomPage() {
         }
         
         console.log("방 상태 업데이트:", status);
-      } catch (error) {
-        console.error("방 상태 메시지 처리 중 오류:", error);
+
+        // 게임 상태나 방 정보만 업데이트하고 불완전한 플레이어 목록은 무시
+        if (status.room) {
+          setRoom(prevRoom => {
+            if (!prevRoom) return status.room;
+            
+            // 방장 변경이나 인원수 변경 등의 정보를 반영
+            const updatedRoom = {
+              ...prevRoom,
+              ...status.room,
+            };
+            
+            // 인원수 정확성 보장: status.players가 있으면 그 길이로 업데이트
+            if (status.players && Array.isArray(status.players) && status.players.length > 0) {
+              updatedRoom.currentPlayers = status.players.length;
+              console.log(`인원수 정확한 데이터로 조정: ${status.players.length}명 (플레이어 목록 기준)`);
+            }
+            
+            // 인원수와 방장 정보 업데이트 로그
+            if (prevRoom.ownerId !== updatedRoom.ownerId) {
+              console.log(`방장 변경: ${prevRoom.ownerNickname} -> ${updatedRoom.ownerNickname || "알 수 없음"}`);
+            }
+            
+            if (prevRoom.currentPlayers !== updatedRoom.currentPlayers) {
+              console.log(`인원수 변경: ${prevRoom.currentPlayers}명 -> ${updatedRoom.currentPlayers}명`);
+            }
+            
+            // 방 상태가 변경되면 게임 상태도 함께 업데이트
+            if (prevRoom.status !== updatedRoom.status) {
+              console.log(`방 상태 변경: ${prevRoom.status} -> ${updatedRoom.status}`);
+              if (updatedRoom.status === 'IN_GAME') {
+                setGameStatus('IN_GAME');
+              } else if (updatedRoom.status === 'FINISHED') {
+                setGameStatus('WAITING');
+              }
+            }
+            
+            return updatedRoom;
+          });
+          
+          // 방장 변경 시 isOwner 상태 업데이트
+          if (status.room.ownerId && currentUserId) {
+            const isCurrentUserOwner = String(status.room.ownerId) === String(currentUserId);
+            setIsOwner(isCurrentUserOwner);
+            console.log(`현재 사용자 방장 여부: ${isCurrentUserOwner}`);
+          }
+        }
+        
+        if (status.gameStatus) {
+          setGameStatus(status.gameStatus);
+          console.log(`게임 상태 업데이트: ${status.gameStatus}`);
+        }
+        
+        // 플레이어 목록이 완전하면 업데이트, 그렇지 않으면 기존 목록 유지
+        if (status.players) {
+          // 1. status.players가 비어있으면 기존 목록 유지
+          if (status.players.length === 0 && players.length > 0) {
+            console.log("빈 플레이어 목록 수신, 기존 목록 유지");
+            return;
+          }
+          
+          // room.players ID 목록과 status.players 객체 배열을 비교하여 완전성 확인
+          const roomPlayerIds = status.room?.players || [];
+          console.log("Room player IDs:", roomPlayerIds);
+          console.log("Status players:", status.players);
+          
+          // room.players에 있지만 status.players에 없는 ID 확인
+          const missingPlayerIds = roomPlayerIds.filter((id: number) => 
+            !status.players.some((p: any) => String(p.id) === String(id))
+          );
+          
+          if (missingPlayerIds.length > 0) {
+            console.log("누락된 플레이어 ID 감지:", missingPlayerIds);
+            
+            // 기존 플레이어 목록에서 해당 ID의 플레이어 정보 보존
+            setPlayers(prevPlayers => {
+              // 수신된 플레이어 정보 형식 통일
+              const formattedReceived = status.players.map((player: any) => ({
+                id: String(player.id),
+                name: player.name || player.nickname || '사용자',
+                nickname: player.nickname || player.name || '사용자',
+                isOwner: Boolean(player.isOwner),
+                isReady: Boolean(player.isReady),
+                avatarUrl: player.avatarUrl || DEFAULT_AVATAR,
+                sessionId: player.sessionId || `session-${Date.now()}`
+              }));
+              
+              // 기존 플레이어 중 누락된 ID 해당 플레이어 정보 유지
+              const preservedPlayers = prevPlayers.filter(player => 
+                missingPlayerIds.includes(Number(player.id))
+              );
+              
+              // 두 배열 병합 (중복 없이)
+              const mergedPlayers = [...formattedReceived];
+              
+              preservedPlayers.forEach(player => {
+                if (!mergedPlayers.some(p => String(p.id) === String(player.id))) {
+                  mergedPlayers.push(player);
+                }
+              });
+              
+              // 방장 속성 정확히 설정
+              if (status.room?.ownerId) {
+                mergedPlayers.forEach(player => {
+                  player.isOwner = String(player.id) === String(status.room.ownerId);
+                });
+              }
+              
+              // 현재 사용자가 목록에 없으면 추가
+              if (currentUser && !mergedPlayers.some(p => String(p.id) === String(currentUser.id))) {
+                const currentUserInfo = prevPlayers.find(p => String(p.id) === String(currentUser.id));
+                if (currentUserInfo) {
+                  mergedPlayers.push(currentUserInfo);
+                  console.log("현재 사용자 정보 목록에 추가");
+                }
+              }
+              
+              console.log("병합된 최종 플레이어 목록:", mergedPlayers);
+              return mergedPlayers;
+            });
+          } else {
+            // 완전한 플레이어 목록인 경우 교체
+            console.log("완전한 플레이어 목록 수신, 목록 교체");
+            
+            // 수신된 목록 형식 통일화
+            const formattedPlayers = status.players.map((player: any) => ({
+              id: String(player.id),
+              name: player.name || player.nickname || '사용자',
+              nickname: player.nickname || player.name || '사용자',
+              isOwner: status.room?.ownerId ? String(player.id) === String(status.room.ownerId) : Boolean(player.isOwner),
+              isReady: Boolean(player.isReady),
+              avatarUrl: player.avatarUrl || DEFAULT_AVATAR,
+              sessionId: player.sessionId || `session-${Date.now()}`
+            }));
+            
+            // 현재 사용자가 수신된 목록에 없으면 추가
+            if (currentUser && !formattedPlayers.some((p: PlayerProfile) => String(p.id) === String(currentUser.id))) {
+              const currentUserInPrevList = players.find((p: PlayerProfile) => String(p.id) === String(currentUser.id));
+              
+              if (currentUserInPrevList) {
+                formattedPlayers.push(currentUserInPrevList);
+                console.log("현재 사용자 정보 목록에 추가");
+              }
+            }
+            
+            setPlayers(formattedPlayers);
+            console.log("방 상태 업데이트: 플레이어 목록 초기화");
+            console.log("상태 채널에서 초기 플레이어 목록 설정:", formattedPlayers);
+          }
+        }
+      } catch (e) {
+        console.error("방 상태 업데이트 메시지 처리 오류:", e);
       }
     });
     
@@ -918,56 +854,6 @@ export default function RoomPage() {
     // 웹소켓 구독 설정 (페이지 진입 시 가장 먼저 실행)
     setupWebSocket();
     
-    // 상태 복원을 위해 저장된 사용자 방 상태 확인
-    const savedRoomState = localStorage.getItem('user_room_state');
-    if (savedRoomState) {
-      try {
-        const parsedState = JSON.parse(savedRoomState);
-        console.log("저장된 방 상태 정보 발견:", parsedState);
-        
-        // 상태 정보가 현재 방과 일치하는지 확인
-        if (parsedState.roomId === parseInt(params.id as string)) {
-          console.log("현재 방과 일치하는 상태 정보 복원");
-          
-          // 사용자 상태를 명시적으로 로비에 알림 (방금 들어왔다는 의미)
-          setTimeout(async () => {
-            // STOMP 클라이언트가 로드되고 연결될 때까지 대기
-            const { safePublish } = await import('@/lib/backend/stompClient');
-            
-            // 로비에 상태 업데이트 전송 (여러 채널에 전송하여 확실히 알림)
-            const channels = [
-              '/app/lobby/users/update',
-              '/app/lobby/status',
-              '/app/lobby/broadcast'
-            ];
-            
-            // 현재 사용자 정보가 있으면 상태 알림
-            if (currentUser) {
-              const userStatusUpdate = {
-                type: "USER_LOCATION_UPDATE",
-                status: "대기중",
-                location: "IN_ROOM",
-                roomId: parseInt(params.id as string),
-                userId: currentUser.id,
-                nickname: currentUser.nickname,
-                senderId: currentUser.id.toString(),
-                senderName: currentUser.nickname,
-                timestamp: Date.now()
-              };
-              
-              // 모든 채널에 상태 메시지 발행
-              for (const channel of channels) {
-                await safePublish(channel, userStatusUpdate);
-                console.log(`사용자 상태 메시지 발행: ${channel}`, userStatusUpdate);
-              }
-            }
-          }, 1000); // 1초 지연 (다른 초기화 작업 완료 대기)
-        }
-      } catch (error) {
-        console.error("저장된 방 상태 정보 파싱 실패:", error);
-      }
-    }
-    
     // 방 정보와 사용자 정보를 순차적으로 로드
     const loadData = async () => {
       try {
@@ -993,60 +879,177 @@ export default function RoomPage() {
           }
         }
         
-        // 방 입장 시 사용자 상태 업데이트
+        // 반환된 userData를 직접 사용하여 방 입장 처리
         if (userData) {
-          const userStatusUpdate = {
+          console.log("사용자 정보 확인됨:", userData.nickname);
+          
+          // 기존 방장 여부 확인 로직 제거 - 서버에서 받은 정보만 사용
+          /* 이 부분 삭제
+          // 방장 여부 확인 및 설정
+          if (room && room.ownerId === userData.id) {
+            setIsOwner(true);
+          }
+          */
+          
+          // 기존 loadData의 joinRoom 호출 대신 임시 플레이어 정보 구성 및 방 입장
+          // 여기에서 isCurrentUserOwner를 임의로 설정하지 않고 서버에서 받을 때까지 기다림
+          const newPlayer = {
+            id: userData.id.toString(),
+            name: userData.nickname,
+            nickname: userData.nickname,
+            isOwner: false, // 초기에는 방장이 아닌 것으로 설정, 서버에서 방장 정보를 받아 업데이트
+            isReady: false,
+            avatarUrl: userData.avatarUrl || DEFAULT_AVATAR
+          };
+          
+          // API 요청
+          console.log("방 입장 API 요청 시작");
+          try {
+            const response = await (client.POST as any)(`/api/v1/rooms/${roomId}/join`, {});
+            console.log("방 입장 API 응답:", response);
+          } catch (error) {
+            console.warn("방 입장 API 요청 실패, 이미 입장한 상태일 수 있음:", error);
+          }
+          
+          // 입장 메시지 전송
+          publish(`/app/room/${roomId}/join`, {
+            roomId: parseInt(roomId)
+          });
+          
+          // 방장 여부 확인 (이미 방에 방장이 있는지 체크)
+          const ownerAlreadyExists = players.some(p => p.isOwner);
+          const shouldBeOwner = !ownerAlreadyExists && (room?.ownerId === userData.id);
+          
+          // 입장 메시지 전송 시 방장 여부도 함께 전송
+          publish(`/app/room/${roomId}/join`, {
+            roomId: parseInt(roomId),
+            isOwner: shouldBeOwner
+          });
+          
+          // 방 입장 시스템 메시지 - 일반 텍스트로 변경
+          publish(`/app/room/chat/${roomId}`, `!SYSTEM ${userData.nickname}님이 입장했습니다.`);
+          
+          // 로비에 사용자 상태 업데이트 전송
+          publish(`/app/lobby/status`, {
             type: "USER_LOCATION_UPDATE",
-            status: "대기중",
+            status: `게임방 ${roomId}번 입장`,
             location: "IN_ROOM",
-            roomId: parseInt(params.id as string),
+            roomId: parseInt(roomId),
             userId: userData.id,
             nickname: userData.nickname,
             senderId: userData.id.toString(),
             senderName: userData.nickname,
             timestamp: Date.now()
-          };
+          });
           
-          // 로비에 상태 업데이트 전송 (여러 채널에 전송하여 확실히 알림)
-          const channels = [
-            '/app/lobby/users/update',
-            '/app/lobby/status',
-            '/app/lobby/broadcast'
-          ];
+          // 로비 사용자 목록 업데이트 메시지를 명시적으로 서버에 전송
+          publish(`/app/lobby/users/update`, {
+            type: "USER_LOCATION_UPDATE",
+            status: `게임방 ${roomId}번`,
+            location: "IN_ROOM",
+            roomId: parseInt(roomId),
+            userId: userData.id,
+            nickname: userData.nickname,
+            senderId: userData.id.toString(),
+            senderName: userData.nickname,
+            timestamp: Date.now()
+          });
           
-          for (const channel of channels) {
-            publish(channel, userStatusUpdate);
-            console.log(`사용자 상태 메시지 발행: ${channel}`, userStatusUpdate);
+          // 모든 채널에 위치 정보 변경 알림
+          for (const channel of ['/app/lobby/users', '/app/lobby/broadcast', '/app/lobby/broadcast/location']) {
+            publish(channel, {
+              type: "USER_LOCATION_UPDATE",
+              status: `게임방 ${roomId}번 입장`,
+              location: "IN_ROOM",
+              roomId: parseInt(roomId),
+              userId: userData.id,
+              nickname: userData.nickname,
+              senderId: userData.id.toString(),
+              senderName: userData.nickname,
+              timestamp: Date.now()
+            });
           }
           
-          // 로컬 스토리지에 상태 정보 저장
-          localStorage.setItem('user_room_state', JSON.stringify(userStatusUpdate));
+          // 3회 반복하여 전송 (확실하게 업데이트되도록)
+          for (let i = 0; i < 3; i++) {
+            setTimeout(() => {
+              publish(`/app/lobby/broadcast`, {
+                type: "USER_LOCATION_UPDATE",
+                userId: userData.id,
+                senderId: userData.id.toString(),
+                nickname: userData.nickname,
+                senderName: userData.nickname,
+                location: "IN_ROOM",
+                status: `게임방 ${roomId}번 입장`,
+                roomId: parseInt(roomId),
+                timestamp: Date.now() + i
+              });
+            }, 500 * (i + 1));
+          }
+          
+          // 플레이어 목록 설정
+          setPlayers(prevPlayers => {
+            const updatedPlayers = [...prevPlayers];
+            const existingIndex = updatedPlayers.findIndex(p => p.id === userData.id.toString());
+            
+            if (existingIndex === -1) {
+              updatedPlayers.push(newPlayer);
+            } else {
+              updatedPlayers[existingIndex] = {
+                ...updatedPlayers[existingIndex],
+                ...newPlayer
+              };
+            }
+            
+            // 상태 업데이트 후 즉시 브로드캐스트 진행
+            if (room) {
+              // 인원 수 즉시 업데이트
+              const updatedRoom = {
+                ...room,
+                currentPlayers: updatedPlayers.length // 실제 플레이어 수로 정확히 설정
+              };
+              
+              // 업데이트된 방 정보로 브로드캐스트
+              publish(`/app/room/${roomId}/status`, {
+                room: updatedRoom,
+                players: updatedPlayers,
+                timestamp: Date.now()
+              });
+              console.log("방 입장 즉시 정확한 인원 수로 브로드캐스트:", updatedPlayers.length);
+              
+              // 방 정보도 즉시 업데이트
+              setRoom(updatedRoom);
+            }
+            
+            return updatedPlayers;
+          });
+          
+          console.log("방 입장 프로세스 완료");
+          
+          // 플레이어 목록 명시적 갱신 요청 - 지연 없이 즉시 실행
+          publish(`/app/room/${roomId}/players/refresh`, {});
+          console.log("방 입장 후 플레이어 목록 명시적 갱신 요청");
+        } else {
+          console.error("사용자 정보가 상태에 설정되지 않았습니다.");
         }
-        
-        // 방 입장 후 상태 동기화를 위해 딜레이 추가
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // 방 상태 브로드캐스트
-        broadcastRoomStatus();
       } catch (error) {
-        console.error("데이터 초기화 중 오류 발생:", error);
+        console.error("방 데이터 로드 또는 입장 중 오류:", error);
       }
     };
     
     loadData();
     
-    // 컴포넌트 언마운트 시 구독 해제
+    // 컴포넌트 언마운트 시 웹소켓 구독 해제
     return () => {
+      console.log("컴포넌트 언마운트 - 웹소켓 구독 해제");
       unsubscribe(`/topic/room/${roomId}`);
-      unsubscribe(`/topic/room/${roomId}/owner/change`);
       unsubscribe(`/topic/room/chat/${roomId}`);
-      unsubscribe(`/topic/lobby/users`);
-      unsubscribe(`/topic/lobby/status`);
-      unsubscribe(`/topic/lobby`);
       unsubscribe(`/topic/room/${roomId}/status`);
+      unsubscribe("/topic/lobby/users");
+      unsubscribe("/topic/lobby/status");
     };
-  }, [roomId, currentUser]);
-
+  }, [roomId]);
+  
   // 현재 사용자 ID 또는 방 정보가 업데이트되면 방장 여부 확인
   useEffect(() => {
     if (currentUserId && room) {
