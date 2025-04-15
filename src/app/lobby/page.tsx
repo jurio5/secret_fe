@@ -1352,7 +1352,7 @@ function LobbyContent({
     }
     
     // 사용자 상태 메시지인 경우
-    if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || message.type === "STATUS_UPDATE") {
+    if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || message.type === "STATUS_UPDATE" || message.type === "USER_LOCATION_UPDATE") {
       // 사용자 목록 갱신
       setActiveUsers(prev => {
         // 기존 사용자 목록에서 해당 사용자 제외

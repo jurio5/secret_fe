@@ -1253,8 +1253,27 @@ export default function RoomPage() {
         status: "로비",
         location: "IN_LOBBY",
         roomId: null,
+        userId: currentUser.id,
+        nickname: currentUser.nickname,
+        senderId: currentUser.id.toString(),
+        senderName: currentUser.nickname,
         timestamp: Date.now()
       });
+      
+      // 여러 번 전송하여 확실하게 업데이트되도록 함
+      setTimeout(() => {
+        publish(`/app/lobby/broadcast`, {
+          type: "USER_LOCATION_UPDATE",
+          status: "로비",
+          location: "IN_LOBBY",
+          roomId: null,
+          userId: currentUser.id,
+          nickname: currentUser.nickname,
+          senderId: currentUser.id.toString(),
+          senderName: currentUser.nickname,
+          timestamp: Date.now() + 1
+        });
+      }, 500);
       
       // 웹소켓 구독 해제
       unsubscribe(`/topic/room/${roomId}`);
