@@ -1373,6 +1373,8 @@ function LobbyContent({
       // 메시지 형식에 따른 룸 ID 추출
       if (typeof message === 'string' && message.startsWith && message.startsWith("ROOM_UPDATED:")) {
         roomId = message.split(":")[1];
+        // 문자열 형식에서는 명시적 상태가 없지만 업데이트를 위해 백엔드에서 가져온다
+        hasStatusUpdate = true;
       } else if (message.roomId) {
         roomId = message.roomId;
         if (message.status) {
@@ -1390,68 +1392,113 @@ function LobbyContent({
       if (roomId) {
         // 개별 방 정보 업데이트
         try {
-          // 상태 변경이 있으면 즉시 반영 (게임 시작)
+          // 상태 변경이 명시적으로 있으면 즉시 반영 (게임 시작)
           if (hasStatusUpdate && newStatus) {
-            console.log(`방 ${roomId} 상태 즉시 변경 시도: ${newStatus}`);
+            console.log(`[CLEAR-TRACE] 방 ${roomId} 상태 즉시 변경 시도: ${newStatus}`);
             setRooms(prevRooms => {
               return prevRooms.map(room => {
                 if (room.id === parseInt(roomId)) {
-                  console.log(`방 ${roomId} 상태 즉시 변경: ${room.status} -> ${newStatus}`);
+                  console.log(`[CLEAR-TRACE] 방 ${roomId} 상태 즉시 변경: ${room.status} -> ${newStatus}`);
                   return { ...room, status: newStatus };
                 }
                 return room;
               });
             });
+          } else if (hasStatusUpdate) {
+            // 상태 정보 없이 업데이트 메시지만 있는 경우(문자열 형식 등), 즉시 백엔드에서 최신 정보 가져오기
+            console.log(`[CLEAR-TRACE] 방 ${roomId} 상태 업데이트 - 백엔드에서 최신 정보 가져오기 시작`);
+            
+            // 즉시 API 호출하여 방 정보 가져오기 
+            fetch(`/api/v1/rooms/${roomId}`)
+              .then(res => {
+                if (!res.ok) {
+                  throw new Error(`방 정보 요청 실패: ${res.status}`);
+                }
+                return res.json();
+              })
+              .then(data => {
+                if (data && data.data) {
+                  const updatedRoom = data.data;
+                  console.log(`[CLEAR-TRACE] 방 ${roomId} 정보 즉시 수신:`, updatedRoom);
+                  console.log(`[CLEAR-TRACE] 방 ${roomId} 상태:`, updatedRoom.status);
+                  
+                  // 우선 상태 즉시 업데이트 
+                  setRooms(prevRooms => {
+                    const roomExists = prevRooms.some(room => room.id === parseInt(roomId));
+                    
+                    if (roomExists) {
+                      const updatedRooms = prevRooms.map(room => {
+                        if (room.id === parseInt(roomId)) {
+                          console.log(`[CLEAR-TRACE] 방 ${roomId} 상태 즉시 반영: ${room.status} -> ${updatedRoom.status}`);
+                          return { ...room, ...updatedRoom };
+                        }
+                        return room;
+                      });
+                      return updatedRooms;
+                    } else {
+                      return [...prevRooms, updatedRoom];
+                    }
+                  });
+                }
+              })
+              .catch(error => {
+                console.error("[CLEAR-TRACE] 방 정보 즉시 업데이트 실패:", error);
+              });
           }
           
-          // 백엔드에서 최신 정보 가져오기
-          fetch(`/api/v1/rooms/${roomId}`)
-            .then(res => {
-              if (!res.ok) {
-                throw new Error(`방 정보 요청 실패: ${res.status}`);
-              }
-              return res.json();
-            })
-            .then(data => {
-              if (data && data.data) {
-                const updatedRoom = data.data;
-                console.log(`방 ${roomId} 정보 수신:`, updatedRoom);
-                
-                setRooms(prevRooms => {
-                  // 기존 목록에 있는지 확인
-                  const roomExists = prevRooms.some(room => room.id === parseInt(roomId));
+          // 약간의 지연 후 백엔드에서 다시 최신 정보 가져오기 (네트워크 지연 고려)
+          setTimeout(() => {
+            console.log(`[CLEAR-TRACE] 방 ${roomId} 상태 업데이트 - 지연 후 백엔드에서 최신 정보 가져오기`);
+            
+            fetch(`/api/v1/rooms/${roomId}`)
+              .then(res => {
+                if (!res.ok) {
+                  throw new Error(`방 정보 요청 실패: ${res.status}`);
+                }
+                return res.json();
+              })
+              .then(data => {
+                if (data && data.data) {
+                  const updatedRoom = data.data;
+                  console.log(`[CLEAR-TRACE] 방 ${roomId} 지연 후 정보 수신:`, updatedRoom);
+                  console.log(`[CLEAR-TRACE] 방 ${roomId} 지연 후 상태:`, updatedRoom.status);
                   
-                  if (roomExists) {
-                    // 기존 방 정보 업데이트
-                    const updatedRooms = prevRooms.map(room => {
-                      if (room.id === parseInt(roomId)) {
-                        console.log(`방 ${roomId} 상태 업데이트: ${room.status} -> ${updatedRoom.status}`);
-                        return { ...room, ...updatedRoom };
-                      }
-                      return room;
-                    });
-                    console.log(`방 ID ${roomId} 정보 업데이트됨:`, updatedRoom);
-                    return updatedRooms;
-                  } else {
-                    // 새 방 추가
-                    console.log(`새 방 정보 추가됨: ID ${roomId}`, updatedRoom);
-                    return [...prevRooms, updatedRoom];
-                  }
-                });
-              }
-            })
-            .catch(error => {
-              console.error("방 정보 업데이트 실패:", error);
-              // 오류 발생 시 전체 목록 새로고침
-              loadRooms();
-            });
+                  setRooms(prevRooms => {
+                    // 기존 목록에 있는지 확인
+                    const roomExists = prevRooms.some(room => room.id === parseInt(roomId));
+                    
+                    if (roomExists) {
+                      // 기존 방 정보 업데이트
+                      const updatedRooms = prevRooms.map(room => {
+                        if (room.id === parseInt(roomId)) {
+                          console.log(`[CLEAR-TRACE] 방 ${roomId} 상태 업데이트: ${room.status} -> ${updatedRoom.status}`);
+                          return { ...room, ...updatedRoom };
+                        }
+                        return room;
+                      });
+                      console.log(`[CLEAR-TRACE] 방 ID ${roomId} 정보 업데이트됨:`, updatedRoom);
+                      return updatedRooms;
+                    } else {
+                      // 새 방 추가
+                      console.log(`[CLEAR-TRACE] 새 방 정보 추가됨: ID ${roomId}`, updatedRoom);
+                      return [...prevRooms, updatedRoom];
+                    }
+                  });
+                }
+              })
+              .catch(error => {
+                console.error("[CLEAR-TRACE] 방 정보 업데이트 실패:", error);
+                // 오류 발생 시 전체 목록 새로고침
+                loadRooms();
+              });
+          }, 1000); // 1초 후 다시 시도
         } catch (error) {
-          console.error("방 정보 업데이트 요청 실패:", error);
+          console.error("[CLEAR-TRACE] 방 정보 업데이트 요청 실패:", error);
           loadRooms();
         }
       } else {
         // 전체 방 목록 새로고침
-        console.log("전체 방 목록 새로고침 (방 업데이트)");
+        console.log("[CLEAR-TRACE] 전체 방 목록 새로고침 (방 업데이트)");
         loadRooms();
       }
       return;
@@ -1460,7 +1507,12 @@ function LobbyContent({
     // 사용자 상태 메시지인 경우
     if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || message.type === "STATUS_UPDATE" || message.type === "USER_LOCATION_UPDATE") {
       // 메시지 정보 로깅
-      console.log(`[LOBBY] 사용자 상태 업데이트 수신: 타입=${message.type}, 사용자=${message.senderName}, 위치=${message.location || "알 수 없음"}, 방=${message.roomId || "없음"}`);
+      console.log(`[CLEAR-TRACE] 사용자 상태 업데이트 수신: 타입=${message.type}, 사용자=${message.senderName}, 위치=${message.location || "알 수 없음"}, 방=${message.roomId || "없음"}, 상태=${message.status || "기본"}`);
+      
+      // 타입이 USER_LOCATION_UPDATE인 경우 중요 내용 강조
+      if (message.type === "USER_LOCATION_UPDATE") {
+        console.log(`[CLEAR-TRACE] 위치 업데이트: 사용자=${message.senderName}, 방=${message.roomId}, 위치=${message.location}, 상태=${message.status}`);
+      }
       
       // 사용자 목록 갱신
       setActiveUsers(prev => {
@@ -1484,9 +1536,21 @@ function LobbyContent({
           // USER_LOCATION_UPDATE 타입일 경우 정확한 상태 표시
           if (message.type === "USER_LOCATION_UPDATE") {
             if (message.location === "IN_ROOM") {
-              console.log(`[LOBBY] ${message.senderName}님이 ${message.roomId}번 방에 입장했습니다. 상태 업데이트`);
+              console.log(`[CLEAR-TRACE] ${message.senderName}님이 ${message.roomId}번 방에 입장했습니다. 상태=${message.status || "게임중"}`);
+              
+              // 상태가 없다면 게임중/대기중을 판단하기 위해 방 정보 확인
+              if (!message.status && message.roomId) {
+                const room = rooms.find(r => r.id === parseInt(message.roomId));
+                if (room && room.status === 'IN_GAME') {
+                  user.status = "게임중";
+                  console.log(`[CLEAR-TRACE] 방 정보로부터 상태 유추: ${message.senderName}님은 게임중 상태로 설정`);
+                } else if (room) {
+                  user.status = "대기중";
+                  console.log(`[CLEAR-TRACE] 방 정보로부터 상태 유추: ${message.senderName}님은 대기중 상태로 설정`);
+                }
+              }
             } else if (message.location === "IN_LOBBY") {
-              console.log(`[LOBBY] ${message.senderName}님이 로비로 돌아왔습니다. 상태 업데이트`);
+              console.log(`[CLEAR-TRACE] ${message.senderName}님이 로비로 돌아왔습니다. 상태=${message.status || "로비"}`);
             }
           }
           

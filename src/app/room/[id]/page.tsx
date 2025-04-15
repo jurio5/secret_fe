@@ -237,13 +237,18 @@ export default function RoomPage() {
                 // ID가 숫자면 문자열로 변환
                 const id = typeof player.id === 'number' ? String(player.id) : player.id;
                 
+                // 방장이 나간 후 다시 들어왔을 때 방장 권한이 돌아가는 문제 해결
+                // 기존 방에 방장이 이미 있는 경우 새로 들어온 사용자는 방장이 될 수 없음
+                const ownerExists = playersData.some((p: any) => p.isOwner && p.id !== player.id);
+                const isOwnerValue = ownerExists ? false : Boolean(player.isOwner);
+                
                 return {
                   ...player,
                   id,
                   // 필수 필드가 없는 경우 기본값 설정
                   name: player.name || player.nickname || '사용자',
                   nickname: player.nickname || player.name || '사용자',
-                  isOwner: Boolean(player.isOwner),
+                  isOwner: isOwnerValue,
                   isReady: Boolean(player.isReady),
                   avatarUrl: player.avatarUrl || DEFAULT_AVATAR,
                   // 중복 방지를 위한 고유 세션 ID (없는 경우)
@@ -351,24 +356,51 @@ export default function RoomPage() {
       }
     });
     
+    // 방장 변경 이벤트 구독
+    subscribe(`/topic/room/${roomId}/owner/change`, (data) => {
+      console.log("방장 변경 이벤트 수신:", data);
+      
+      if (data && data.newOwnerId && data.newOwnerNickname) {
+        // 방 정보 업데이트
+        setRoom(prevRoom => {
+          if (!prevRoom) return prevRoom;
+          return {
+            ...prevRoom,
+            ownerId: data.newOwnerId,
+            ownerNickname: data.newOwnerNickname
+          };
+        });
+        
+        // 플레이어 목록에서 방장 상태 업데이트
+        setPlayers(prevPlayers => {
+          const updatedPlayers = prevPlayers.map(player => ({
+            ...player,
+            isOwner: String(player.id) === String(data.newOwnerId)
+          }));
+          
+          return updatedPlayers;
+        });
+        
+        // 현재 사용자 방장 여부 업데이트
+        if (currentUserId && String(currentUserId) === String(data.newOwnerId)) {
+          setIsOwner(true);
+          console.log("현재 사용자가 새로운 방장이 되었습니다.");
+        } else {
+          setIsOwner(false);
+        }
+      }
+    });
+    
     // 퀴즈 생성 상태 구독 추가 - 모든 참가자가 공통으로 처리하도록 수정
     subscribe(`/topic/room/${roomId}/quiz/generation`, (data) => {
       console.log("퀴즈 생성 상태 업데이트:", data);
       
       if (data.status === "STARTED" || data.status === "IN_PROGRESS") {
         // 진행 상태 메시지 전송
-        publish(`/app/room/chat/${roomId}`, {
-          type: "SYSTEM",
-          content: data.message || "문제 생성이 진행 중입니다...",
-          timestamp: Date.now()
-        });
+        publish(`/app/room/chat/${roomId}`, `!SYSTEM ${data.message || "문제 생성이 진행 중입니다..."}`);
       } else if (data.status === "COMPLETED") {
         // 완료 메시지 전송
-        publish(`/app/room/chat/${roomId}`, {
-          type: "SYSTEM",
-          content: "문제 생성 완료! 3초 후 게임이 시작됩니다.",
-          timestamp: Date.now()
-        });
+        publish(`/app/room/chat/${roomId}`, `!SYSTEM 문제 생성 완료! 3초 후 게임이 시작됩니다.`);
         
         // 중요: 모든 클라이언트에서 게임 상태를 IN_GAME으로 즉시 변경
         setGameStatus('IN_GAME');
@@ -390,15 +422,48 @@ export default function RoomPage() {
         });
         
         // 로비에 방 상태 변경 알림 (대기중 -> 게임중)
-        publish('/app/lobby', {
+        // 여러 형식으로 전송하여 확실하게 전달되도록 함
+        const statusUpdatePayload = {
           type: "ROOM_UPDATED",
           roomId: parseInt(roomId),
           status: "IN_GAME",
           timestamp: Date.now()
-        });
+        };
         
-        // 직접적으로 로비에 방 상태가 변경되었음을 알림
-        publish(`/app/lobby`, `ROOM_UPDATED:${roomId}`);
+        // 1. 로비 메인 채널로 전송
+        publish('/app/lobby', statusUpdatePayload);
+        
+        // 2. 다른 형식으로도 전송 (문자열 형식)
+        publish('/app/lobby', `ROOM_UPDATED:${roomId}`);
+        
+        // 3. 로비 상태 채널로도 전송
+        publish('/app/lobby/status', statusUpdatePayload);
+        
+        // 4. 방송 채널로도 전송
+        publish('/app/lobby/broadcast', statusUpdatePayload);
+        
+        // 현재 방의 모든 플레이어의 상태를 업데이트하여 로비에 알림
+        if (players && players.length > 0) {
+          console.log("모든 플레이어 상태 업데이트 (게임 시작):", players);
+          
+          players.forEach(player => {
+            const playerStatusUpdate = {
+              type: "USER_LOCATION_UPDATE",
+              status: "게임중",
+              location: "IN_ROOM",
+              roomId: parseInt(roomId),
+              userId: parseInt(player.id),
+              senderId: player.id,
+              senderName: player.nickname || player.name,
+              timestamp: Date.now()
+            };
+            
+            // 모든 채널에 위치 정보 변경 알림
+            ['lobby', 'lobby/status', 'lobby/users', 'lobby/broadcast'].forEach(channel => {
+              publish(`/app/${channel}`, playerStatusUpdate);
+            });
+          });
+        }
         
         // 지연 후 상태 브로드캐스트 - 게임 상태 동기화
         setTimeout(() => {
@@ -422,11 +487,7 @@ export default function RoomPage() {
         }, 1500);
       } else if (data.status === "FAILED") {
         // 실패 시 에러 메시지 표시
-        publish(`/app/room/chat/${roomId}`, {
-          type: "SYSTEM",
-          content: data.message || "문제 생성에 실패했습니다. 다시 시도해주세요.",
-          timestamp: Date.now()
-        });
+        publish(`/app/room/chat/${roomId}`, `!SYSTEM ${data.message || "문제 생성에 실패했습니다. 다시 시도해주세요."}`);
         
         // 게임 상태 롤백
         setGameStatus('WAITING');
@@ -796,18 +857,21 @@ export default function RoomPage() {
         if (userData) {
           console.log("사용자 정보 확인됨:", userData.nickname);
           
+          // 기존 방장 여부 확인 로직 제거 - 서버에서 받은 정보만 사용
+          /* 이 부분 삭제
           // 방장 여부 확인 및 설정
           if (room && room.ownerId === userData.id) {
             setIsOwner(true);
           }
+          */
           
           // 기존 loadData의 joinRoom 호출 대신 임시 플레이어 정보 구성 및 방 입장
-          const isCurrentUserOwner = room && userData.id === room.ownerId;
+          // 여기에서 isCurrentUserOwner를 임의로 설정하지 않고 서버에서 받을 때까지 기다림
           const newPlayer = {
             id: userData.id.toString(),
             name: userData.nickname,
             nickname: userData.nickname,
-            isOwner: isCurrentUserOwner,
+            isOwner: false, // 초기에는 방장이 아닌 것으로 설정, 서버에서 방장 정보를 받아 업데이트
             isReady: false,
             avatarUrl: userData.avatarUrl || DEFAULT_AVATAR
           };
@@ -824,6 +888,16 @@ export default function RoomPage() {
           // 입장 메시지 전송
           publish(`/app/room/${roomId}/join`, {
             roomId: parseInt(roomId)
+          });
+          
+          // 방장 여부 확인 (이미 방에 방장이 있는지 체크)
+          const ownerAlreadyExists = players.some(p => p.isOwner);
+          const shouldBeOwner = !ownerAlreadyExists && (room?.ownerId === userData.id);
+          
+          // 입장 메시지 전송 시 방장 여부도 함께 전송
+          publish(`/app/room/${roomId}/join`, {
+            roomId: parseInt(roomId),
+            isOwner: shouldBeOwner
           });
           
           // 방 입장 시스템 메시지 - 일반 텍스트로 변경
@@ -1123,8 +1197,8 @@ export default function RoomPage() {
         return;
       }
       
-      // 문제 생성 중임을 알리는 시스템 메시지 (일반 텍스트로 변경)
-      publish(`/app/room/chat/${roomId}`, `AI가 문제를 생성하는 중입니다. 잠시만 기다려주세요...`);
+      // 문제 생성 중임을 알리는 시스템 메시지 (!SYSTEM 접두사 사용)
+      publish(`/app/room/chat/${roomId}`, `!SYSTEM AI가 문제를 생성하는 중입니다. 잠시만 기다려주세요...`);
       
       // WebSocket을 통해 AI 퀴즈 생성 요청 전송
       publish(`/app/room/${roomId}/quiz/generate`, {
@@ -1144,24 +1218,27 @@ export default function RoomPage() {
       
       // 퀴즈 생성 상태 구독 (없는 경우 새로 구독)
       if (!subscribers.includes(`/topic/room/${roomId}/quiz/generation`)) {
+        // 이미 전송된 메시지 추적용 변수
+        let sentMessages: Set<string> = new Set();
+        
         subscribe(`/topic/room/${roomId}/quiz/generation`, (data) => {
           console.log("퀴즈 생성 상태 업데이트:", data);
           
-          // 퀴즈 생성 상태에 따른 처리
-          if (data.status === "STARTED" || data.status === "IN_PROGRESS") {
-            // 진행 상태 메시지 전송
-            publish(`/app/room/chat/${roomId}`, {
-              type: "SYSTEM",
-              content: data.message || "문제 생성이 진행 중입니다...",
-              timestamp: Date.now()
-            });
-          } else if (data.status === "COMPLETED") {
-            // 완료 메시지 전송
-            publish(`/app/room/chat/${roomId}`, {
-              type: "SYSTEM",
-              content: "문제 생성 완료! 3초 후 게임이 시작됩니다.",
-              timestamp: Date.now()
-            });
+          // 메시지 내용 계산 (실제 메시지 또는 기본 메시지)
+          const messageContent = data.message || "문제 생성이 진행 중입니다...";
+          
+          // 이 메시지를 이전에 보낸 적이 없는 경우에만 메시지 전송
+          if (!sentMessages.has(messageContent)) {
+            // 메시지 전송
+            publish(`/app/room/chat/${roomId}`, `!SYSTEM ${messageContent}`);
+            // 전송 기록
+            sentMessages.add(messageContent);
+          }
+          
+          // 게임 완료 상태일 때 완료 메시지 전송 (항상 한 번만 전송)
+          if (data.status === "COMPLETED" && !sentMessages.has("문제 생성 완료!")) {
+            publish(`/app/room/chat/${roomId}`, `!SYSTEM 문제 생성 완료! 3초 후 게임이 시작됩니다.`);
+            sentMessages.add("문제 생성 완료!");
             
             // 중요: 모든 클라이언트에서 게임 상태를 IN_GAME으로 즉시 변경
             setGameStatus('IN_GAME');
@@ -1183,15 +1260,48 @@ export default function RoomPage() {
             });
             
             // 로비에 방 상태 변경 알림 (대기중 -> 게임중)
-            publish('/app/lobby', {
+            // 여러 형식으로 전송하여 확실하게 전달되도록 함
+            const statusUpdatePayload = {
               type: "ROOM_UPDATED",
               roomId: parseInt(roomId),
               status: "IN_GAME",
               timestamp: Date.now()
-            });
+            };
             
-            // 직접적으로 로비에 방 상태가 변경되었음을 알림
-            publish(`/app/lobby`, `ROOM_UPDATED:${roomId}`);
+            // 1. 로비 메인 채널로 전송
+            publish('/app/lobby', statusUpdatePayload);
+            
+            // 2. 다른 형식으로도 전송 (문자열 형식)
+            publish('/app/lobby', `ROOM_UPDATED:${roomId}`);
+            
+            // 3. 로비 상태 채널로도 전송
+            publish('/app/lobby/status', statusUpdatePayload);
+            
+            // 4. 방송 채널로도 전송
+            publish('/app/lobby/broadcast', statusUpdatePayload);
+            
+            // 현재 방의 모든 플레이어의 상태를 업데이트하여 로비에 알림
+            if (players && players.length > 0) {
+              console.log("모든 플레이어 상태 업데이트 (게임 시작):", players);
+              
+              players.forEach(player => {
+                const playerStatusUpdate = {
+                  type: "USER_LOCATION_UPDATE",
+                  status: "게임중",
+                  location: "IN_ROOM",
+                  roomId: parseInt(roomId),
+                  userId: parseInt(player.id),
+                  senderId: player.id,
+                  senderName: player.nickname || player.name,
+                  timestamp: Date.now()
+                };
+                
+                // 모든 채널에 위치 정보 변경 알림
+                ['lobby', 'lobby/status', 'lobby/users', 'lobby/broadcast'].forEach(channel => {
+                  publish(`/app/${channel}`, playerStatusUpdate);
+                });
+              });
+            }
             
             // 지연 후 상태 브로드캐스트 - 게임 상태 동기화
             setTimeout(() => {
@@ -1215,11 +1325,7 @@ export default function RoomPage() {
             }, 1500);
           } else if (data.status === "FAILED") {
             // 실패 시 에러 메시지 표시
-            publish(`/app/room/chat/${roomId}`, {
-              type: "SYSTEM",
-              content: data.message || "문제 생성에 실패했습니다. 다시 시도해주세요.",
-              timestamp: Date.now()
-            });
+            publish(`/app/room/chat/${roomId}`, `!SYSTEM ${data.message || "문제 생성에 실패했습니다. 다시 시도해주세요."}`);
             
             // 게임 상태 롤백
             setGameStatus('WAITING');
@@ -1255,33 +1361,54 @@ export default function RoomPage() {
       // 퇴장 시스템 메시지 먼저 전송 - 일반 텍스트로 변경
       publish(`/app/room/chat/${roomId}`, `!SYSTEM ${currentUser.nickname}님이 퇴장했습니다.`);
       
+      // 현재 사용자 ID
+      const currentUserId = currentUser.id.toString();
+      
+      // 현재 사용자가 방장인지 확인
+      const isCurrentUserOwner = isOwner;
+      
+      // 방장이 나가는 경우, 다음 방장 지정
+      if (isCurrentUserOwner) {
+        const remainingPlayers = players.filter(player => player.id !== currentUserId);
+        if (remainingPlayers.length > 0) {
+          // 남은 사용자 중 첫 번째 사용자를 방장으로 지정
+          const newOwner = remainingPlayers[0];
+          
+          // 새 방장 정보 업데이트
+          publish(`/app/room/${roomId}/owner/change`, {
+            roomId: parseInt(roomId),
+            newOwnerId: parseInt(newOwner.id),
+            newOwnerNickname: newOwner.nickname
+          });
+          
+          // 방장 변경 메시지 전송
+          publish(`/app/room/chat/${roomId}`, `!SYSTEM ${newOwner.nickname}님이 새로운 방장이 되었습니다.`);
+          
+          console.log(`방장 권한 이전: ${currentUser.nickname} -> ${newOwner.nickname}`);
+        }
+      }
+      
       // 퇴장 메시지 전송
       publish(`/app/room/${roomId}/leave`, {
         roomId: parseInt(roomId)
       });
       
-      // 현재 사용자 ID
-      const currentUserId = currentUser.id.toString();
-      
-      // 플레이어 목록에서 현재 사용자 제거
-      const updatedPlayers = players.filter(player => player.id !== currentUserId);
-      
       // 방 정보 업데이트 (인원 수 정확히 반영)
       const updatedRoom = {
         ...room,
-        currentPlayers: updatedPlayers.length
+        currentPlayers: players.length - 1
       };
       
       // 인원 수 즉시 갱신을 위한 브로드캐스트 메시지 전송
       publish(`/app/room/${roomId}/status`, {
         room: updatedRoom,
-        players: updatedPlayers,
+        players: players,
         timestamp: Date.now()
       });
-      console.log("방 퇴장 즉시 정확한 인원 수로 브로드캐스트:", updatedPlayers.length);
+      console.log("방 퇴장 즉시 정확한 인원 수로 브로드캐스트:", updatedRoom.currentPlayers);
       
       // 로컬 상태도 업데이트
-      setPlayers(updatedPlayers);
+      setPlayers(players.filter(player => player.id !== currentUserId));
       setRoom(updatedRoom);
 
       // 로비에 사용자 상태 업데이트 전송
@@ -1372,6 +1499,9 @@ export default function RoomPage() {
         
         // 방 상태 구독 해제
         unsubscribe(`/topic/room/${roomId}/status`);
+        
+        // 방장 변경 이벤트 구독 해제
+        unsubscribe(`/topic/room/${roomId}/owner/change`);
         
         // 퀴즈 생성 상태 구독 해제
         unsubscribe(`/topic/room/${roomId}/quiz/generation`);

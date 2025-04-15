@@ -67,10 +67,12 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     totalStages?: number;
     stageDescription?: string;
     animation?: string;
+    lastMessage?: string; // 중복 메시지 방지용 이전 메시지 저장
   }>({
     status: "IDLE",
     message: "준비 중입니다...",
-    progress: 0,
+    progress: 20, // 기본값 20%로 시작
+    lastMessage: "",
   });
   
   // 현재 문제 정보
@@ -230,29 +232,123 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     // 플레이어 스코어 초기화
     initializePlayerScores();
     
+    // 인공적인 진행률 증가를 위한 변수와 함수
+    let lastReceivedProgress = 0;
+    let currentDisplayProgress = 0;
+    let progressIntervalId: NodeJS.Timeout | null = null;
+    
+    // 진행률 부드럽게 증가시키는 함수
+    const startSmoothProgress = (targetProgress: number) => {
+      // 이미 인터벌이 실행 중이면 취소
+      if (progressIntervalId) {
+        clearInterval(progressIntervalId);
+      }
+      
+      // 현재 진행률에서 목표 진행률까지 부드럽게 증가
+      progressIntervalId = setInterval(() => {
+        if (currentDisplayProgress < targetProgress) {
+          // 남은 거리를 기준으로 증가량 계산 (빠르게 진행되다가 목표에 가까워지면 천천히)
+          const step = Math.max(1, Math.floor((targetProgress - currentDisplayProgress) / 5));
+          currentDisplayProgress = Math.min(targetProgress, currentDisplayProgress + step);
+          
+          // UI 업데이트
+          setQuizGenerationStatus(prev => ({
+            ...prev,
+            progress: currentDisplayProgress
+          }));
+        } else if (progressIntervalId) {
+          // 목표 도달 시 인터벌 취소
+          clearInterval(progressIntervalId);
+          progressIntervalId = null;
+        }
+      }, 100);
+    };
+    
     // 퀴즈 생성 상태 구독
     const generationSubscriptionId = subscribe(`/topic/room/${roomId}/quiz/generation`, (data) => {
       console.log("퀴즈 생성 상태 수신:", data);
-      setQuizGenerationStatus({
+      
+      // 서버 메시지 처리
+      const newMessage = data.message || "퀴즈를 생성 중입니다...";
+      
+      // 이전 메시지와 비교하여 중복 방지
+      const isDuplicateMessage = newMessage === quizGenerationStatus.lastMessage;
+      
+      // 진행률 계산 로직 - 서버에서 값이 없으면 단계별로 값 할당
+      let progressValue = data.progress;
+      if (progressValue === undefined || progressValue === 0) {
+        if (data.status === "STARTED") {
+          progressValue = 25;
+        } else if (data.status === "IN_PROGRESS") {
+          // 현재 진행률에 기반하여 증가
+          progressValue = Math.min(80, quizGenerationStatus.progress + 15);
+        } else if (data.status === "COMPLETED") {
+          progressValue = 100;
+        }
+      }
+      
+      // 상태 업데이트 (중복 메시지가 아닌 경우에만 메시지 업데이트)
+      setQuizGenerationStatus(prev => ({
+        ...prev,
         status: data.status,
-        message: data.message || "퀴즈를 생성 중입니다...",
-        progress: data.progress || 0,
+        message: isDuplicateMessage ? prev.message : newMessage,
+        progress: progressValue || prev.progress,
         stage: data.stage,
         totalStages: data.totalStages,
         stageDescription: data.stageDescription,
-        animation: data.animation
-      });
+        animation: data.animation,
+        lastMessage: newMessage // 이전 메시지 저장
+      }));
       
-      // 진행 상태에 따른 토스트 메시지 표시
-      if (data.status === "STARTED") {
+      // 중복이 아닌 경우만 메시지 전송
+      if (!isDuplicateMessage) {
+        // 진행 상태에 따른 토스트 메시지 표시
+        if (data.status === "STARTED") {
+          toast.success("퀴즈 생성이 시작되었습니다!");
+        } else if (data.status === "IN_PROGRESS" && progressValue >= 50 && quizGenerationStatus.progress < 50) {
+          toast.success(`퀴즈 생성 진행중: 50%`);
+        }
+      }
+      
+      // 새 진행률이 이전보다 높으면 부드러운 진행률 애니메이션 시작
+      if (progressValue > lastReceivedProgress) {
+        lastReceivedProgress = progressValue;
+        startSmoothProgress(progressValue);
+      }
+      
+      // 상태에 따른 인공적인 진행률 처리
+      if (data.status === "STARTED" && progressValue === 0) {
+        // 처음 시작 - 0%에서 20%까지 올라가도록
+        lastReceivedProgress = 20;
+        startSmoothProgress(20);
+        
+        // 시작 토스트
         toast.success("퀴즈 생성이 시작되었습니다!");
-      } else if (data.status === "IN_PROGRESS" && data.progress % 25 === 0) {
-        // 25%, 50%, 75% 진행 시에만 토스트 표시
-        toast.success(`퀴즈 생성 진행중: ${data.progress}%`);
+      } else if (data.status === "IN_PROGRESS") {
+        // 진행 중 - 서버에서 진행률을 받지 못하면 점점 올라가도록 처리
+        if (progressValue === 0) {
+          // 서버에서 명시적인 진행률을 보내지 않는 경우 단계별로 진행률 증가
+          const newProgress = Math.min(80, lastReceivedProgress + 15);
+          lastReceivedProgress = newProgress;
+          startSmoothProgress(newProgress);
+        }
+        
+        // 25%, 50%, 75% 도달 시 토스트 (중복 방지) 
+        if (progressValue >= 25 && lastReceivedProgress < 25) {
+          toast.success(`퀴즈 생성 진행중: 25%`);
+        } else if (progressValue >= 50 && lastReceivedProgress < 50) {
+          toast.success(`퀴즈 생성 진행중: 50%`);
+        } else if (progressValue >= 75 && lastReceivedProgress < 75) {
+          toast.success(`퀴즈 생성 진행중: 75%`);
+        }
       }
       
       // 퀴즈 생성이 완료되면 게임 시작 준비
       if (data.status === "COMPLETED") {
+        // 완료 시 100%로 설정
+        lastReceivedProgress = 100;
+        startSmoothProgress(100);
+        
         console.log("퀴즈 생성이 완료되었습니다. 게임 시작 준비 중...");
         
         // 완료 토스트 메시지
@@ -351,12 +447,15 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       }
     });
     
-    // 컴포넌트 언마운트 시 구독 해제
+    // 컴포넌트 언마운트 시 구독 및 인터벌 해제
     return () => {
       unsubscribe(`/topic/room/${roomId}/quiz/generation`);
+      if (progressIntervalId) {
+        clearInterval(progressIntervalId);
+      }
       console.log("퀴즈 생성 상태 구독 해제");
     };
-  }, [roomId, publish, quizId, fetchQuestions]);
+  }, [roomId, publish, quizId, fetchQuestions, quizGenerationStatus.status]);
 
   // 문제 변경 이벤트 구독은 별도의 useEffect로 분리
   useEffect(() => {
@@ -1250,7 +1349,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     <div className="flex flex-col h-full">
       {/* 게임 헤더 - 문제 번호, 타이머, 카테고리 등 */}
       <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-xl p-4 mb-4">
-        <div className="flex flex-wrap justify-between items-center">
+        <div className="flex justify-between items-center">
           <div className="flex items-center">
             <div className="text-gray-400 mr-2">문제</div>
             <div className="text-xl font-bold text-white">
@@ -1258,7 +1357,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
             </div>
           </div>
           
-          <div className="flex items-center">
+          <div className="flex-grow flex justify-center items-center">
             <FaClock className="text-gray-400 mr-2" />
             <Timer 
               key={forceRenderKey}
@@ -1268,15 +1367,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
             />
           </div>
           
-          <div className="hidden md:flex items-center">
-            <FaFlag className="text-gray-400 mr-2" />
-            <div className="text-white font-medium">
-              {currentQuestion?.category === "GENERAL_KNOWLEDGE" ? "일반 상식" : 
-                currentQuestion?.category === "SCIENCE" ? "과학" : 
-                currentQuestion?.category === "HISTORY" ? "역사" : 
-                currentQuestion?.category === "LANGUAGE" ? "언어" : "기타"}
-            </div>
-          </div>
+          <div className="w-16"></div> {/* 균형을 위한 빈 공간 */}
         </div>
       </div>
       
