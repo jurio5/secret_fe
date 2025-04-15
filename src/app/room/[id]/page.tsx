@@ -349,6 +349,78 @@ export default function RoomPage() {
       }
     });
     
+    // 퀴즈 생성 상태 구독 추가 - 모든 참가자가 공통으로 처리하도록 수정
+    subscribe(`/topic/room/${roomId}/quiz/generation`, (data) => {
+      console.log("퀴즈 생성 상태 업데이트:", data);
+      
+      if (data.status === "STARTED" || data.status === "IN_PROGRESS") {
+        // 진행 상태 메시지 전송
+        publish(`/app/room/chat/${roomId}`, {
+          type: "SYSTEM",
+          content: data.message || "문제 생성이 진행 중입니다...",
+          timestamp: Date.now()
+        });
+      } else if (data.status === "COMPLETED") {
+        // 완료 메시지 전송
+        publish(`/app/room/chat/${roomId}`, {
+          type: "SYSTEM",
+          content: "문제 생성 완료! 3초 후 게임이 시작됩니다.",
+          timestamp: Date.now()
+        });
+        
+        // 중요: 모든 클라이언트에서 게임 상태를 IN_GAME으로 즉시 변경
+        setGameStatus('IN_GAME');
+        
+        // 퀴즈 ID가 있으면 세션 스토리지에 저장 (모든 클라이언트)
+        if (data.quizId) {
+          console.log(`퀴즈 생성 완료, ID: ${data.quizId} - 모든 클라이언트 게임 상태 변경`);
+          window.sessionStorage.setItem('currentQuizId', data.quizId);
+        }
+        
+        // 방 상태 업데이트
+        setRoom(prevRoom => {
+          if (!prevRoom) return prevRoom;
+          
+          return { 
+            ...prevRoom, 
+            status: 'IN_GAME' 
+          };
+        });
+        
+        // 지연 후 상태 브로드캐스트 - 게임 상태 동기화
+        setTimeout(() => {
+          // 방 상태 메시지 발행 (전체 동기화)
+          publish(`/app/room/${roomId}/status`, {
+            gameStatus: 'IN_PROGRESS',
+            quizId: data.quizId,
+            room: {
+              status: 'IN_GAME'
+            },
+            timestamp: Date.now()
+          });
+          
+          // 게임 시작 메시지도 발행 (명시적 브로드캐스트)
+          publish(`/app/room/${roomId}/broadcastGameStart`, {
+            roomId: roomId,
+            quizId: data.quizId,
+            gameStatus: 'IN_PROGRESS',
+            timestamp: Date.now()
+          });
+        }, 1500);
+      } else if (data.status === "FAILED") {
+        // 실패 시 에러 메시지 표시
+        publish(`/app/room/chat/${roomId}`, {
+          type: "SYSTEM",
+          content: data.message || "문제 생성에 실패했습니다. 다시 시도해주세요.",
+          timestamp: Date.now()
+        });
+        
+        // 게임 상태 롤백
+        setGameStatus('WAITING');
+        console.error("문제 생성 실패:", data.message);
+      }
+    });
+    
     // 방 채팅 구독
     subscribe(`/topic/room/chat/${roomId}`, (message) => {
       try {
@@ -984,42 +1056,45 @@ export default function RoomPage() {
               timestamp: Date.now()
             });
             
-            // 게임 시작 상태로 즉시 업데이트
+            // 중요: 모든 클라이언트에서 게임 상태를 IN_GAME으로 즉시 변경
             setGameStatus('IN_GAME');
+            
+            // 퀴즈 ID가 있으면 세션 스토리지에 저장 (모든 클라이언트)
+            if (data.quizId) {
+              console.log(`퀴즈 생성 완료, ID: ${data.quizId} - 모든 클라이언트 게임 상태 변경`);
+              window.sessionStorage.setItem('currentQuizId', data.quizId);
+            }
             
             // 방 상태 업데이트
             setRoom(prevRoom => {
               if (!prevRoom) return prevRoom;
               
-              // 타입이 맞는 방식으로 업데이트
-              const updatedRoom: RoomResponse = {
-                ...prevRoom,
-                status: 'IN_GAME' as "WAITING" | "IN_GAME" | "FINISHED" 
+              return { 
+                ...prevRoom, 
+                status: 'IN_GAME' 
               };
-              
-              return updatedRoom;
             });
             
-            // 상태 브로드캐스트를 약간의 지연 후 수행하여 UI가 먼저 업데이트되도록 함
+            // 지연 후 상태 브로드캐스트 - 게임 상태 동기화
             setTimeout(() => {
+              // 방 상태 메시지 발행 (전체 동기화)
               publish(`/app/room/${roomId}/status`, {
+                gameStatus: 'IN_PROGRESS',
+                quizId: data.quizId,
                 room: {
-                  ...room,
                   status: 'IN_GAME'
                 },
-                players: players,
-                gameStatus: 'IN_GAME',
                 timestamp: Date.now()
               });
               
-              // 게임 시작 메시지도 추가로 전송
-              publish(`/app/room/${roomId}/game/start`, {
+              // 게임 시작 메시지도 발행 (명시적 브로드캐스트)
+              publish(`/app/room/${roomId}/broadcastGameStart`, {
                 roomId: roomId,
                 quizId: data.quizId,
-                gameStatus: 'IN_GAME',
+                gameStatus: 'IN_PROGRESS',
                 timestamp: Date.now()
               });
-            }, 1000);
+            }, 1500);
           } else if (data.status === "FAILED") {
             // 실패 시 에러 메시지 표시
             publish(`/app/room/chat/${roomId}`, {
