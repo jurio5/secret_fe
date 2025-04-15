@@ -25,6 +25,35 @@ export default function PlayerList({
   roomStatus = 'WAITING'
 }: PlayerListProps) {
   const [cachedPlayers, setCachedPlayers] = useState<PlayerProfile[]>([]);
+  const [isButtonCooldown, setIsButtonCooldown] = useState<boolean>(false);
+  const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
+  
+  // 쿨다운 타이머 관리
+  useEffect(() => {
+    // 컴포넌트 마운트 시 마지막 토글 시간 확인
+    const checkCooldown = () => {
+      const lastToggleTime = parseInt(sessionStorage.getItem('lastReadyToggleTime') || '0');
+      const currentTime = Date.now();
+      const cooldownTime = 1500; // 1.5초 (toggleReady 함수와 동일하게 유지)
+      const remainingTime = Math.max(0, cooldownTime - (currentTime - lastToggleTime));
+      
+      if (remainingTime > 0) {
+        setIsButtonCooldown(true);
+        setCooldownRemaining(remainingTime);
+      } else {
+        setIsButtonCooldown(false);
+        setCooldownRemaining(0);
+      }
+    };
+    
+    // 초기 확인
+    checkCooldown();
+    
+    // 100ms마다 상태 체크
+    const timer = setInterval(checkCooldown, 100);
+    
+    return () => clearInterval(timer);
+  }, []);
   
   // 플레이어 목록이 비어있지 않은 경우에만 캐시 업데이트
   useEffect(() => {
@@ -137,13 +166,18 @@ export default function PlayerList({
             <div className="mt-4 pt-3 border-t border-gray-700">
               <button 
                 onClick={onToggleReady}
+                disabled={isButtonCooldown}
                 className={`w-full py-2 rounded-lg font-medium ${
-                  isReady 
-                    ? 'bg-red-600 hover:bg-red-700 text-white' 
-                    : 'bg-green-600 hover:bg-green-700 text-white'
+                  isButtonCooldown
+                    ? 'bg-gray-500 text-gray-300 cursor-not-allowed'
+                    : isReady 
+                      ? 'bg-red-600 hover:bg-red-700 text-white' 
+                      : 'bg-green-600 hover:bg-green-700 text-white'
                 }`}
               >
-                {isReady ? '준비 취소' : '준비 완료'}
+                {isButtonCooldown 
+                  ? `대기 중... (${Math.ceil(cooldownRemaining / 1000)}초)` 
+                  : isReady ? '준비 취소' : '준비 완료'}
               </button>
             </div>
           )}

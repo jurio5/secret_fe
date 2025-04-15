@@ -7,7 +7,7 @@ import client from "@/lib/backend/client";
 import { subscribe, unsubscribe, publish } from "@/lib/backend/stompClient";
 import { components } from "@/lib/backend/apiV1/schema";
 import Image from "next/image";
-import { FaChevronLeft, FaDoorOpen, FaCrown, FaCheck, FaComments, FaUsers, FaInfoCircle, FaPlay, FaBrain, FaList, FaQuestionCircle } from "react-icons/fa";
+import { FaChevronLeft, FaDoorOpen, FaCrown, FaCheck, FaComments, FaUsers, FaInfoCircle, FaPlay, FaBrain, FaList, FaQuestionCircle, FaHourglass } from "react-icons/fa";
 import GameContainer from "@/components/game/GameContainer";
 import { useSearchParams } from "next/navigation";
 import { updateOnlineUserIds } from '@/components/friend/friendApi';
@@ -94,6 +94,11 @@ export default function RoomPage() {
   const [gameStatus, setGameStatus] = useState<string>('WAITING');
   const [activeTab, setActiveTab] = useState<'players' | 'chat'>('players');
   const [subscribers, setSubscribers] = useState<string[]>([]);
+  const [isGameStartCooldown, setIsGameStartCooldown] = useState<boolean>(false);
+  const [gameStartCooldownRemaining, setGameStartCooldownRemaining] = useState<number>(0);
+  // 추가 상태 변수 선언 부분 (isGameStartCooldown 바로 아래에 추가)
+  const [isReadyCooldown, setIsReadyCooldown] = useState<boolean>(false);
+  const [readyCooldownRemaining, setReadyCooldownRemaining] = useState<number>(0);
   
   // 플레이어 목록 초기화 여부 추적
   const playersInitialized = useRef<boolean>(false);
@@ -1174,8 +1179,22 @@ export default function RoomPage() {
         return;
       }
       
+      // 쿨다운 타이머 처리 - 마지막 준비 상태 변경 후 1.5초 이내에는 다시 변경 불가
+      const lastToggleTime = parseInt(sessionStorage.getItem('lastReadyToggleTime') || '0');
+      const currentTime = Date.now();
+      const cooldownTime = 1500; // 1.5초 쿨다운
+      
+      // 쿨다운 시간이 지나지 않았으면 리턴
+      if (currentTime - lastToggleTime < cooldownTime) {
+        console.log("준비 상태 변경 쿨다운 중입니다. 잠시 후 다시 시도하세요.");
+        return;
+      }
+      
       // 현재 준비 상태의 반대로 설정
       const newReadyState = !isReady;
+      
+      // 현재 시간을 세션 스토리지에 저장
+      sessionStorage.setItem('lastReadyToggleTime', currentTime.toString());
       
       // API 호출 - 준비 상태 변경 (as any 타입 캐스팅 사용)
       await (client.POST as any)(`/api/v1/rooms/${roomId}/ready`, {
@@ -1227,6 +1246,20 @@ export default function RoomPage() {
         console.error("방장만 게임을 시작할 수 있거나 방 정보가 없습니다.");
         return;
       }
+      
+      // 쿨다운 타이머 처리 - 마지막 시작 시도 후 3초 이내에는 다시 시도 불가
+      const lastStartTime = parseInt(sessionStorage.getItem('lastGameStartTime') || '0');
+      const currentTime = Date.now();
+      const cooldownTime = 3000; // 3초 쿨다운
+      
+      // 쿨다운 시간이 지나지 않았으면 리턴
+      if (currentTime - lastStartTime < cooldownTime) {
+        console.log("게임 시작 쿨다운 중입니다. 잠시 후 다시 시도하세요.");
+        return;
+      }
+      
+      // 현재 시간을 세션 스토리지에 저장
+      sessionStorage.setItem('lastGameStartTime', currentTime.toString());
       
       // 게임 시작 로딩 상태 표시
       setGameStatus('STARTING');
@@ -1691,6 +1724,66 @@ export default function RoomPage() {
     };
   }, [roomId]);
 
+  // 게임 시작 쿨다운 타이머 관리
+  useEffect(() => {
+    // 방장인 경우에만 타이머 적용
+    if (!isOwner) return;
+    
+    // 컴포넌트 마운트 시 마지막 시작 시간 확인
+    const checkCooldown = () => {
+      const lastStartTime = parseInt(sessionStorage.getItem('lastGameStartTime') || '0');
+      const currentTime = Date.now();
+      const cooldownTime = 3000; // 3초 (startGame 함수와 동일하게 유지)
+      const remainingTime = Math.max(0, cooldownTime - (currentTime - lastStartTime));
+      
+      if (remainingTime > 0) {
+        setIsGameStartCooldown(true);
+        setGameStartCooldownRemaining(remainingTime);
+      } else {
+        setIsGameStartCooldown(false);
+        setGameStartCooldownRemaining(0);
+      }
+    };
+    
+    // 초기 확인
+    checkCooldown();
+    
+    // 100ms마다 상태 체크
+    const timer = setInterval(checkCooldown, 100);
+    
+    return () => clearInterval(timer);
+  }, [isOwner]);
+
+  // 준비 버튼 쿨다운 타이머 관리 (게임 시작 쿨다운 타이머 관리 바로 아래에 추가)
+  useEffect(() => {
+    // 방장이 아닌 경우에만 타이머 적용
+    if (isOwner) return;
+    
+    // 컴포넌트 마운트 시 마지막 토글 시간 확인
+    const checkCooldown = () => {
+      const lastToggleTime = parseInt(sessionStorage.getItem('lastReadyToggleTime') || '0');
+      const currentTime = Date.now();
+      const cooldownTime = 1500; // 1.5초 (toggleReady 함수와 동일하게 유지)
+      const remainingTime = Math.max(0, cooldownTime - (currentTime - lastToggleTime));
+      
+      if (remainingTime > 0) {
+        setIsReadyCooldown(true);
+        setReadyCooldownRemaining(remainingTime);
+      } else {
+        setIsReadyCooldown(false);
+        setReadyCooldownRemaining(0);
+      }
+    };
+    
+    // 초기 확인
+    checkCooldown();
+    
+    // 100ms마다 상태 체크
+    const timer = setInterval(checkCooldown, 100);
+    
+    return () => clearInterval(timer);
+  }, [isOwner]);
+
   if (loading) {
     return (
       <AppLayout showBeforeUnloadWarning={false} showHeader={false}>
@@ -1981,28 +2074,47 @@ export default function RoomPage() {
                 {isOwner ? (
                   // 방장이면 시작 버튼
                   <button
-                    className={`bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white px-8 py-3 rounded-xl font-medium transition-all shadow-md ${
-                      players.filter(p => !p.isOwner).every(p => p.isReady)
-                        ? ''
-                        : 'opacity-50 cursor-not-allowed'
-                    }`}
+                    className={`bg-gradient-to-r ${
+                      isGameStartCooldown
+                        ? 'from-gray-500 to-gray-600 cursor-not-allowed'
+                        : players.filter(p => !p.isOwner).every(p => p.isReady)
+                          ? 'from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700'
+                          : 'from-indigo-400 to-blue-400 opacity-50 cursor-not-allowed'
+                    } text-white px-8 py-3 rounded-xl font-medium transition-all shadow-md`}
                     onClick={startGame}
-                    disabled={!players.filter(p => !p.isOwner).every(p => p.isReady)}
+                    disabled={isGameStartCooldown || !players.filter(p => !p.isOwner).every(p => p.isReady)}
                   >
-                    <FaPlay className="inline-block mr-2" />
-                    게임 시작
+                    {isGameStartCooldown ? (
+                      <>
+                        <FaHourglass className="inline-block mr-2 animate-pulse" />
+                        대기 중... ({Math.ceil(gameStartCooldownRemaining / 1000)}초)
+                      </>
+                    ) : (
+                      <>
+                        <FaPlay className="inline-block mr-2" />
+                        게임 시작
+                      </>
+                    )}
                   </button>
                 ) : (
                   // 일반 사용자면 준비 버튼
                   <button
                     className={`${
-                      isReady
-                        ? 'bg-green-600 hover:bg-green-700'
-                        : 'bg-blue-600 hover:bg-blue-700'
+                      isReadyCooldown
+                        ? 'bg-gray-500 text-gray-300 cursor-not-allowed'
+                        : isReady
+                          ? 'bg-green-600 hover:bg-green-700'
+                          : 'bg-blue-600 hover:bg-blue-700'
                     } text-white px-8 py-3 rounded-xl font-medium transition-all shadow-md`}
                     onClick={toggleReady}
+                    disabled={isReadyCooldown}
                   >
-                    {isReady ? (
+                    {isReadyCooldown ? (
+                      <>
+                        <FaHourglass className="inline-block mr-2 animate-pulse" />
+                        대기 중... ({Math.ceil(readyCooldownRemaining / 1000)}초)
+                      </>
+                    ) : isReady ? (
                       <>
                         <FaCheck className="inline-block mr-2" />
                         준비 완료
