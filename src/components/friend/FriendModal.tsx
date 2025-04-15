@@ -6,7 +6,12 @@ import { FriendModalProps, Friend, FriendRequest } from './types';
 import { getFriendList, getFriendRequests, acceptFriendRequest, rejectFriendRequest, deleteFriend } from './friendApi';
 // import { toast } from 'react-hot-toast';
 
-const FriendModal: React.FC<FriendModalProps> = ({ isOpen, onClose }) => {
+const FriendModal: React.FC<FriendModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  friendRequestCount, 
+  onRequestCountChange 
+}) => {
   const [activeTab, setActiveTab] = useState<'friends' | 'requests' | 'search'>('friends');
   const [friendList, setFriendList] = useState<Friend[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
@@ -40,6 +45,11 @@ const FriendModal: React.FC<FriendModalProps> = ({ isOpen, onClose }) => {
     try {
       const requests = await getFriendRequests();
       setFriendRequests(requests);
+      
+      // 부모 컴포넌트에 친구 요청 개수 전달
+      if (onRequestCountChange) {
+        onRequestCountChange(requests.length);
+      }
     } catch (error) {
       console.error("친구 요청 목록을 불러오는데 실패했습니다:", error);
     }
@@ -93,6 +103,9 @@ const FriendModal: React.FC<FriendModalProps> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
+  // 내부 상태 또는 props에서 친구 요청 개수 결정
+  const requestCount = friendRequestCount !== undefined ? friendRequestCount : friendRequests.length;
+
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="bg-gray-800/80 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-3xl mx-4 p-6 relative">
@@ -127,9 +140,9 @@ const FriendModal: React.FC<FriendModalProps> = ({ isOpen, onClose }) => {
             }`}
           >
             친구 요청
-            {friendRequests.length > 0 && (
+            {requestCount > 0 && (
               <span className="ml-2 px-2 py-0.5 text-xs bg-blue-500 text-white rounded-full">
-                {friendRequests.length}
+                {requestCount}
               </span>
             )}
           </button>
