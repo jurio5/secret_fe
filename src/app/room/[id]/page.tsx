@@ -831,6 +831,21 @@ export default function RoomPage() {
             timestamp: Date.now()
           });
           
+          // 모든 채널에 위치 정보 변경 알림
+          for (const channel of ['/app/lobby/users', '/app/lobby/broadcast', '/app/lobby/broadcast/location']) {
+            publish(channel, {
+              type: "USER_LOCATION_UPDATE",
+              status: `게임방 ${roomId}번 입장`,
+              location: "IN_ROOM",
+              roomId: parseInt(roomId),
+              userId: userData.id,
+              nickname: userData.nickname,
+              senderId: userData.id.toString(),
+              senderName: userData.nickname,
+              timestamp: Date.now()
+            });
+          }
+          
           // 3회 반복하여 전송 (확실하게 업데이트되도록)
           for (let i = 0; i < 3; i++) {
             setTimeout(() => {
@@ -1259,6 +1274,21 @@ export default function RoomPage() {
         senderName: currentUser.nickname,
         timestamp: Date.now()
       });
+      
+      // 모든 채널에 위치 정보 변경 알림
+      for (const channel of ['/app/lobby/users', '/app/lobby/broadcast', '/app/lobby/broadcast/location']) {
+        publish(channel, {
+          type: "USER_LOCATION_UPDATE",
+          status: "로비",
+          location: "IN_LOBBY",
+          roomId: null,
+          userId: currentUser.id,
+          nickname: currentUser.nickname,
+          senderId: currentUser.id.toString(),
+          senderName: currentUser.nickname,
+          timestamp: Date.now()
+        });
+      }
       
       // 여러 번 전송하여 확실하게 업데이트되도록 함
       setTimeout(() => {

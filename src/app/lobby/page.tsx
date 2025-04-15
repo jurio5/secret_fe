@@ -634,6 +634,8 @@ function LobbyContent({
               
               // 로비 접속자 목록 구독
               subscribe("/topic/lobby/users", async (data: User[]) => {
+                console.log("[LOBBY] 로비 유저 목록 수신:", data);
+                
                 // 온라인 사용자 ID 목록 추출 및 업데이트
                 const onlineUserIds = data.map(user => user.id);
                 updateOnlineUserIds(onlineUserIds);
@@ -641,25 +643,58 @@ function LobbyContent({
                 // 아바타 정보 추가
                 const usersWithAvatars = await fetchUserAvatars(data);
                 
+                // 현재 상태의 activeUsers에서 location과 roomId 정보 유지
+                const updatedUsers = usersWithAvatars.map(newUser => {
+                  // 기존 사용자 정보 찾기
+                  const existingUser = activeUsers.find(u => u.id === newUser.id);
+                  
+                  // 기존 사용자 정보가 있고 IN_ROOM 상태라면 그 정보 유지
+                  if (existingUser && existingUser.location === "IN_ROOM") {
+                    return {
+                      ...newUser,
+                      location: existingUser.location,
+                      roomId: existingUser.roomId,
+                      status: existingUser.status
+                    };
+                  }
+                  
+                  // 새로 받은 정보에 location이 있으면 그 정보 사용
+                  if (newUser.location === "IN_ROOM") {
+                    return newUser;
+                  }
+                  
+                  // 그 외에는 기본적으로 로비에 있는 것으로 설정
+                  return {
+                    ...newUser,
+                    location: newUser.location || "IN_LOBBY",
+                    status: newUser.status || "online"
+                  };
+                });
+                
                 // 현재 사용자를 목록 최상단으로 정렬
                 if (currentUser) {
-                  const sortedUsers = [...usersWithAvatars].sort((a, b) => {
+                  const sortedUsers = [...updatedUsers].sort((a, b) => {
                     if (a.id === currentUser.id) return -1;
                     if (b.id === currentUser.id) return 1;
                     return 0;
                   });
                   setActiveUsers(sortedUsers);
                 } else {
-                  setActiveUsers(usersWithAvatars);
+                  setActiveUsers(updatedUsers);
                 }
                 
                 setIsConnected(true);
                 
                 // 현재 로그인한 사용자의 정보도 업데이트
                 if (currentUser) {
-                  const updatedCurrentUser = usersWithAvatars.find(user => user.id === currentUser.id);
+                  const updatedCurrentUser = updatedUsers.find(user => user.id === currentUser.id);
                   if (updatedCurrentUser) {
-                    setCurrentUser(updatedCurrentUser);
+                    // User 타입에 맞게 roomId가 null이면 undefined로 변환
+                    const typeSafeUser = {
+                      ...updatedCurrentUser,
+                      roomId: updatedCurrentUser.roomId === null ? undefined : updatedCurrentUser.roomId
+                    };
+                    setCurrentUser(typeSafeUser as User);
                   }
                 }
               });
@@ -739,6 +774,8 @@ function LobbyContent({
 
     // 로비 접속자 목록 구독
     subscribe("/topic/lobby/users", async (data: User[]) => {
+      console.log("[LOBBY] 로비 유저 목록 수신:", data);
+      
       // 온라인 사용자 ID 목록 추출 및 업데이트
       const onlineUserIds = data.map(user => user.id);
       updateOnlineUserIds(onlineUserIds);
@@ -746,25 +783,58 @@ function LobbyContent({
       // 아바타 정보 추가
       const usersWithAvatars = await fetchUserAvatars(data);
       
+      // 현재 상태의 activeUsers에서 location과 roomId 정보 유지
+      const updatedUsers = usersWithAvatars.map(newUser => {
+        // 기존 사용자 정보 찾기
+        const existingUser = activeUsers.find(u => u.id === newUser.id);
+        
+        // 기존 사용자 정보가 있고 IN_ROOM 상태라면 그 정보 유지
+        if (existingUser && existingUser.location === "IN_ROOM") {
+          return {
+            ...newUser,
+            location: existingUser.location,
+            roomId: existingUser.roomId,
+            status: existingUser.status
+          };
+        }
+        
+        // 새로 받은 정보에 location이 있으면 그 정보 사용
+        if (newUser.location === "IN_ROOM") {
+          return newUser;
+        }
+        
+        // 그 외에는 기본적으로 로비에 있는 것으로 설정
+        return {
+          ...newUser,
+          location: newUser.location || "IN_LOBBY",
+          status: newUser.status || "online"
+        };
+      });
+      
       // 현재 사용자를 목록 최상단으로 정렬
       if (currentUser) {
-        const sortedUsers = [...usersWithAvatars].sort((a, b) => {
+        const sortedUsers = [...updatedUsers].sort((a, b) => {
           if (a.id === currentUser.id) return -1;
           if (b.id === currentUser.id) return 1;
           return 0;
         });
         setActiveUsers(sortedUsers);
       } else {
-        setActiveUsers(usersWithAvatars);
+        setActiveUsers(updatedUsers);
       }
       
       setIsConnected(true);
       
       // 현재 로그인한 사용자의 정보도 업데이트
       if (currentUser) {
-        const updatedCurrentUser = usersWithAvatars.find(user => user.id === currentUser.id);
+        const updatedCurrentUser = updatedUsers.find(user => user.id === currentUser.id);
         if (updatedCurrentUser) {
-          setCurrentUser(updatedCurrentUser);
+          // User 타입에 맞게 roomId가 null이면 undefined로 변환
+          const typeSafeUser = {
+            ...updatedCurrentUser,
+            roomId: updatedCurrentUser.roomId === null ? undefined : updatedCurrentUser.roomId
+          };
+          setCurrentUser(typeSafeUser as User);
         }
       }
     });
@@ -1353,6 +1423,9 @@ function LobbyContent({
     
     // 사용자 상태 메시지인 경우
     if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || message.type === "STATUS_UPDATE" || message.type === "USER_LOCATION_UPDATE") {
+      // 메시지 정보 로깅
+      console.log(`[LOBBY] 사용자 상태 업데이트 수신: 타입=${message.type}, 사용자=${message.senderName}, 위치=${message.location || "알 수 없음"}, 방=${message.roomId || "없음"}`);
+      
       // 사용자 목록 갱신
       setActiveUsers(prev => {
         // 기존 사용자 목록에서 해당 사용자 제외
@@ -1371,6 +1444,16 @@ function LobbyContent({
             sessions: currentUser?.sessions,
             lastActive: currentUser?.lastActive
           };
+          
+          // USER_LOCATION_UPDATE 타입일 경우 정확한 상태 표시
+          if (message.type === "USER_LOCATION_UPDATE") {
+            if (message.location === "IN_ROOM") {
+              console.log(`[LOBBY] ${message.senderName}님이 ${message.roomId}번 방에 입장했습니다. 상태 업데이트`);
+            } else if (message.location === "IN_LOBBY") {
+              console.log(`[LOBBY] ${message.senderName}님이 로비로 돌아왔습니다. 상태 업데이트`);
+            }
+          }
+          
           return [...filtered, user];
         }
         
