@@ -83,6 +83,9 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   // 타임아웃 실행 여부 추적
   const [timeoutExecuted, setTimeoutExecuted] = useState<boolean>(false);
   
+  // 플레이어 선택 추적을 위한 상태 추가
+  const [playerChoices, setPlayerChoices] = useState<Record<string, { nickname: string, answerId: number, avatarUrl?: string }>>({});
+  
   // 더미 문제 생성 함수 (훅 아님)
   const createDummyQuestions = () => {
     console.log("더미 문제 데이터 생성");
@@ -760,37 +763,45 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   
   // 답변 제출 처리
   const handleSubmitAnswer = (answer: string) => {
-    if (answerSubmitted || showResults) return;
-    
-    console.log(`답변 선택: ${answer}`);
+    if (answerSubmitted) return;
+
     setSelectedAnswer(answer);
     setAnswerSubmitted(true);
-    
-    // 정답 확인
-    const isCorrect = typeof currentQuestion?.correctAnswer === 'number'
-      ? answer === currentQuestion?.choices[currentQuestion.correctAnswer]
-      : answer === currentQuestion?.correctAnswer;
-    
+
+    // 정답 인덱스
+    const correctAnswerIndex = typeof currentQuestion.correctAnswer === 'number'
+      ? currentQuestion.correctAnswer
+      : currentQuestion.choices.indexOf(currentQuestion.correctAnswer as string);
+
+    // 선택한 답변 인덱스
+    const selectedAnswerIndex = currentQuestion.choices.indexOf(answer);
+
+    // 정답 여부
+    const isCorrect = selectedAnswerIndex === correctAnswerIndex;
+
     // 서버에 답변 전송
     publish(`/app/room/${roomId}/answer`, {
-      questionId: currentQuestion?.id,
+      questionId: currentQuestion.id,
       playerId: currentUserId,
-      answer: answer,
+      answer: selectedAnswerIndex,
       isCorrect: isCorrect,
       timestamp: Date.now()
     });
-    
-    // API로 답변 제출
-    submitAnswerToServer(currentQuestion?.id, answer, isCorrect);
-    
-    // 로컬 플레이어 점수 업데이트
+
+    // 다른 플레이어들에게 선택 알림
+    publish(`/app/game/${roomId}/player-choice`, {
+      playerId: currentUserId,
+      playerNickname: playerScores.find(p => p.id === currentUserId.toString())?.nickname || "플레이어",
+      answerId: selectedAnswerIndex,
+      avatarUrl: playerScores.find(p => p.id === currentUserId.toString())?.avatarUrl || "",
+      timestamp: Date.now()
+    });
+
+    // 로컬 상태 업데이트
     updatePlayerScore(isCorrect);
-    
-    console.log("답변이 웹소켓을 통해 제출되었습니다.");
-    
-    // 모든 플레이어가 제출했는지 확인하는 로직은 서버에서 처리
-    // 현재 사용자의 결과만 즉시 보여줌 (채점 결과 등)
-    // 결과 화면은 타이머가 만료되거나 서버에서 신호가 오면 표시됨
+
+    // API로 답변 제출
+    submitAnswerToServer(currentQuestion.id, answer, isCorrect);
   };
   
   // 서버에 답변 제출하는 웹소켓 메시지 전송
@@ -1156,6 +1167,46 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     }
   }, [gameStatus]);
   
+  // 플레이어 선택 수신을 위한 웹소켓 구독 추가 (useEffect 내에 추가)
+  useEffect(() => {
+    // 다른 플레이어의 선택 구독
+    const playerChoiceSubscriptionId = subscribe(`/topic/game/${roomId}/player-choice`, (data) => {
+      console.log("다른 플레이어 선택 수신:", data);
+      
+      // 자신의 선택은 무시
+      if (data.playerId === currentUserId) {
+        return;
+      }
+      
+      // 플레이어 선택 정보 업데이트
+      setPlayerChoices(prev => ({
+        ...prev,
+        [data.playerId]: {
+          nickname: data.playerNickname,
+          answerId: data.answerId,
+          avatarUrl: data.avatarUrl
+        }
+      }));
+      
+      // 토스트 메시지 (선택적)
+      toast.success(`${data.playerNickname}님이 선택했습니다.`, {
+        duration: 1500,
+        icon: '👆'
+      });
+    });
+    
+    // 컴포넌트 언마운트 시 구독 해제
+    return () => {
+      unsubscribe(`/topic/game/${roomId}/player-choice`);
+    };
+  }, [roomId, currentUserId, subscribe, unsubscribe]);
+
+  // 문제 변경 시 플레이어 선택 초기화
+  useEffect(() => {
+    // 새 문제로 변경되면 플레이어 선택 초기화
+    setPlayerChoices({});
+  }, [currentQuestionIndex]);
+  
   // 게임 대기 화면
   if (gameStatus === "WAITING") {
     return (
@@ -1375,14 +1426,15 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         {/* 문제 및 보기 영역 */}
         <div className="flex-grow">
           {currentQuestion && (
-            <QuizQuestion 
+            <QuizQuestion
               question={currentQuestion}
               selectedAnswer={selectedAnswer}
               onSelectAnswer={handleSubmitAnswer}
               showResults={showResults}
               answerSubmitted={answerSubmitted}
               onNext={moveToNextQuestion}
-              isLastQuestion={currentQuestionIndex + 1 >= (room?.problemCount || 5) || window.sessionStorage.getItem('isLastQuestion') === 'true'}
+              isLastQuestion={currentQuestionIndex === questions.length - 1}
+              playerChoices={playerChoices}
             />
           )}
         </div>

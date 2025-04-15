@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { FaCheck, FaTimes } from 'react-icons/fa';
+import { FaUser } from 'react-icons/fa';
 
 interface QuizQuestionProps {
   question: {
@@ -17,6 +17,7 @@ interface QuizQuestionProps {
   answerSubmitted: boolean;
   onNext: () => void;
   isLastQuestion: boolean;
+  playerChoices?: Record<string, { nickname: string, answerId: number, avatarUrl?: string }>;
 }
 
 export default function QuizQuestion({
@@ -26,7 +27,8 @@ export default function QuizQuestion({
   showResults,
   answerSubmitted,
   onNext,
-  isLastQuestion
+  isLastQuestion,
+  playerChoices = {}
 }: QuizQuestionProps) {
   // 정답 인덱스
   const correctAnswerIndex = typeof question.correctAnswer === 'number' 
@@ -43,6 +45,11 @@ export default function QuizQuestion({
   
   // 정답 여부
   const isCorrect = selectedAnswerIndex === correctAnswerIndex;
+
+  // 각 선택지별 선택한 플레이어 목록
+  const getPlayersForChoice = (choiceIndex: number) => {
+    return Object.values(playerChoices).filter(player => player.answerId === choiceIndex);
+  };
   
   return (
     <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-6 h-full flex flex-col">
@@ -90,12 +97,40 @@ export default function QuizQuestion({
                 <div className="flex-grow pt-1">
                   {choice}
                 </div>
+                {/* 이 선택지를 선택한 플레이어 아이콘 표시 */}
+                {getPlayersForChoice(index).length > 0 && (
+                  <div className="flex -space-x-2 ml-2 items-center">
+                    {getPlayersForChoice(index).map((player, playerIndex) => (
+                      <div 
+                        key={playerIndex} 
+                        className="w-6 h-6 rounded-full bg-blue-700 border-2 border-gray-800 flex items-center justify-center text-white"
+                        title={player.nickname}
+                      >
+                        {player.avatarUrl ? (
+                          <img 
+                            src={player.avatarUrl} 
+                            alt={player.nickname}
+                            className="w-full h-full object-cover rounded-full"
+                          />
+                        ) : (
+                          player.nickname.charAt(0).toUpperCase()
+                        )}
+                      </div>
+                    ))}
+                    {getPlayersForChoice(index).length > 3 && (
+                      <div className="w-6 h-6 rounded-full bg-gray-700 border-2 border-gray-800 flex items-center justify-center text-xs text-white">
+                        +{getPlayersForChoice(index).length - 3}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/* 정답 표시는 결과 화면에서만 표시 */}
                 {showResults && (
                   <div className="flex-shrink-0 ml-2">
-                    {index === correctAnswerIndex ? (
-                      <FaCheck className="text-green-400 text-lg" />
-                    ) : (
-                      selectedAnswerIndex === index && <FaTimes className="text-red-400 text-lg" />
+                    {index === correctAnswerIndex && (
+                      <div className="text-green-400 text-xs font-medium bg-green-900/30 px-2 py-1 rounded">
+                        정답
+                      </div>
                     )}
                   </div>
                 )}
