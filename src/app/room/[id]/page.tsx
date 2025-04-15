@@ -421,6 +421,32 @@ export default function RoomPage() {
           };
         });
         
+        // 방 상태 변경 메시지를 명시적으로 서버에 전송
+        publish(`/app/room/${roomId}/status/update`, {
+          status: 'IN_GAME',
+          gameStatus: 'IN_PROGRESS',
+          quizId: data.quizId,
+          roomId: parseInt(roomId),
+          timestamp: Date.now()
+        });
+        
+        // 로비 사용자 목록 업데이트 메시지를 명시적으로 서버에 전송
+        if (players && players.length > 0) {
+          players.forEach(player => {
+            publish(`/app/lobby/users/update`, {
+              type: "USER_LOCATION_UPDATE",
+              status: "게임중",
+              location: "IN_ROOM",
+              roomId: parseInt(roomId),
+              userId: parseInt(player.id),
+              nickname: player.nickname || player.name,
+              senderId: player.id,
+              senderName: player.nickname || player.name,
+              timestamp: Date.now()
+            });
+          });
+        }
+        
         // 로비에 방 상태 변경 알림 (대기중 -> 게임중)
         // 여러 형식으로 전송하여 확실하게 전달되도록 함
         const statusUpdatePayload = {
@@ -916,6 +942,19 @@ export default function RoomPage() {
             timestamp: Date.now()
           });
           
+          // 로비 사용자 목록 업데이트 메시지를 명시적으로 서버에 전송
+          publish(`/app/lobby/users/update`, {
+            type: "USER_LOCATION_UPDATE",
+            status: `게임방 ${roomId}번`,
+            location: "IN_ROOM",
+            roomId: parseInt(roomId),
+            userId: userData.id,
+            nickname: userData.nickname,
+            senderId: userData.id.toString(),
+            senderName: userData.nickname,
+            timestamp: Date.now()
+          });
+          
           // 모든 채널에 위치 정보 변경 알림
           for (const channel of ['/app/lobby/users', '/app/lobby/broadcast', '/app/lobby/broadcast/location']) {
             publish(channel, {
@@ -1259,6 +1298,32 @@ export default function RoomPage() {
               };
             });
             
+            // 방 상태 변경 메시지를 명시적으로 서버에 전송
+            publish(`/app/room/${roomId}/status/update`, {
+              status: 'IN_GAME',
+              gameStatus: 'IN_PROGRESS',
+              quizId: data.quizId,
+              roomId: parseInt(roomId),
+              timestamp: Date.now()
+            });
+            
+            // 로비 사용자 목록 업데이트 메시지를 명시적으로 서버에 전송
+            if (players && players.length > 0) {
+              players.forEach(player => {
+                publish(`/app/lobby/users/update`, {
+                  type: "USER_LOCATION_UPDATE",
+                  status: "게임중",
+                  location: "IN_ROOM",
+                  roomId: parseInt(roomId),
+                  userId: parseInt(player.id),
+                  nickname: player.nickname || player.name,
+                  senderId: player.id,
+                  senderName: player.nickname || player.name,
+                  timestamp: Date.now()
+                });
+              });
+            }
+            
             // 로비에 방 상태 변경 알림 (대기중 -> 게임중)
             // 여러 형식으로 전송하여 확실하게 전달되도록 함
             const statusUpdatePayload = {
@@ -1413,6 +1478,19 @@ export default function RoomPage() {
 
       // 로비에 사용자 상태 업데이트 전송
       publish(`/app/lobby/status`, {
+        type: "USER_LOCATION_UPDATE",
+        status: "로비",
+        location: "IN_LOBBY",
+        roomId: null,
+        userId: currentUser.id,
+        nickname: currentUser.nickname,
+        senderId: currentUser.id.toString(),
+        senderName: currentUser.nickname,
+        timestamp: Date.now()
+      });
+      
+      // 로비 사용자 목록 업데이트 메시지를 명시적으로 서버에 전송
+      publish(`/app/lobby/users/update`, {
         type: "USER_LOCATION_UPDATE",
         status: "로비",
         location: "IN_LOBBY",
