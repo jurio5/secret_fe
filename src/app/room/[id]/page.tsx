@@ -497,11 +497,18 @@ export default function RoomPage() {
         if (status.room) {
           setRoom(prevRoom => {
             if (!prevRoom) return status.room;
+            
             // 방장 변경이나 인원수 변경 등의 정보를 반영
             const updatedRoom = {
               ...prevRoom,
               ...status.room,
             };
+            
+            // 인원수 정확성 보장: status.players가 있으면 그 길이로 업데이트
+            if (status.players && Array.isArray(status.players) && status.players.length > 0) {
+              updatedRoom.currentPlayers = status.players.length;
+              console.log(`인원수 정확한 데이터로 조정: ${status.players.length}명 (플레이어 목록 기준)`);
+            }
             
             // 인원수와 방장 정보 업데이트 로그
             if (prevRoom.ownerId !== updatedRoom.ownerId) {
@@ -761,39 +768,34 @@ export default function RoomPage() {
               };
             }
             
-            // 상태 업데이트 완료 후 브로드캐스트를 위한 setTimeout 사용
-            setTimeout(() => {
-              if (room) {
-                publish(`/app/room/${roomId}/status`, {
-                  room: room,
-                  players: updatedPlayers,
-                  timestamp: Date.now()
-                });
-                console.log("방 입장 후 설정된 플레이어 목록 브로드캐스트:", updatedPlayers);
-              }
-            }, 500);
+            // 상태 업데이트 후 즉시 브로드캐스트 진행
+            if (room) {
+              // 인원 수 즉시 업데이트
+              const updatedRoom = {
+                ...room,
+                currentPlayers: updatedPlayers.length // 실제 플레이어 수로 정확히 설정
+              };
+              
+              // 업데이트된 방 정보로 브로드캐스트
+              publish(`/app/room/${roomId}/status`, {
+                room: updatedRoom,
+                players: updatedPlayers,
+                timestamp: Date.now()
+              });
+              console.log("방 입장 즉시 정확한 인원 수로 브로드캐스트:", updatedPlayers.length);
+              
+              // 방 정보도 즉시 업데이트
+              setRoom(updatedRoom);
+            }
             
             return updatedPlayers;
           });
           
           console.log("방 입장 프로세스 완료");
           
-          // 방 상태 정보 브로드캐스트 - 추가 시간 지연
-          setTimeout(() => {
-            if (room) {
-              const roomStatusData = {
-                room: room,
-                players: players,
-                timestamp: Date.now()
-              };
-              publish(`/app/room/${roomId}/status`, roomStatusData);
-              console.log("방 입장 후 추가 브로드캐스트 완료");
-              
-              // 플레이어 목록 명시적 갱신 요청
-              publish(`/app/room/${roomId}/players/refresh`, {});
-              console.log("방 입장 후 플레이어 목록 명시적 갱신 요청");
-            }
-          }, 2000);
+          // 플레이어 목록 명시적 갱신 요청 - 지연 없이 즉시 실행
+          publish(`/app/room/${roomId}/players/refresh`, {});
+          console.log("방 입장 후 플레이어 목록 명시적 갱신 요청");
         } else {
           console.error("사용자 정보가 상태에 설정되지 않았습니다.");
         }
@@ -1146,30 +1148,30 @@ export default function RoomPage() {
         roomId: parseInt(roomId)
       });
       
-      // 플레이어 목록에서 현재 사용자 제거 후 브로드캐스트
-      setPlayers(prevPlayers => {
-        const updatedPlayers = prevPlayers.filter(player => 
-          player.id !== currentUser.id.toString()
-        );
-        
-        // 상태가 업데이트된 후 즉시 브로드캐스트
-        setTimeout(() => {
-          if (room) {
-            publish(`/app/room/${roomId}/status`, {
-              room: {
-                ...room,
-                currentPlayers: Math.max(0, updatedPlayers.length)
-              },
-              players: updatedPlayers,
-              timestamp: Date.now()
-            });
-            console.log("방 퇴장 후 업데이트된 플레이어 목록 브로드캐스트:", updatedPlayers);
-          }
-        }, 0);
-        
-        return updatedPlayers;
-      });
+      // 현재 사용자 ID
+      const currentUserId = currentUser.id.toString();
       
+      // 플레이어 목록에서 현재 사용자 제거
+      const updatedPlayers = players.filter(player => player.id !== currentUserId);
+      
+      // 방 정보 업데이트 (인원 수 정확히 반영)
+      const updatedRoom = {
+        ...room,
+        currentPlayers: updatedPlayers.length
+      };
+      
+      // 인원 수 즉시 갱신을 위한 브로드캐스트 메시지 전송
+      publish(`/app/room/${roomId}/status`, {
+        room: updatedRoom,
+        players: updatedPlayers,
+        timestamp: Date.now()
+      });
+      console.log("방 퇴장 즉시 정확한 인원 수로 브로드캐스트:", updatedPlayers.length);
+      
+      // 로컬 상태도 업데이트
+      setPlayers(updatedPlayers);
+      setRoom(updatedRoom);
+
       // 로비에 사용자 상태 업데이트 전송
       publish(`/app/lobby/status`, {
         type: "STATUS_UPDATE",

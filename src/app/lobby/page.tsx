@@ -1587,11 +1587,15 @@ function LobbyContent({
                     }}
                   >
                     <div className="flex justify-between items-center mb-3">
-                      <div className="text-xs uppercase tracking-wider text-blue-400 font-semibold">
-                        {room.status === "WAITING" ? "WAITING" : room.status || "대기중"}
+                      <div className={`text-xs uppercase tracking-wider font-semibold ${
+                        room.status === "IN_GAME" ? "text-red-400" : "text-blue-400"
+                      }`}>
+                        {room.status === "IN_GAME" ? "게임중" : "대기중"}
                       </div>
                       <div className="flex items-center">
-                        <div className="w-2 h-2 bg-green-400 rounded-full mr-1"></div>
+                        <div className={`w-2 h-2 ${
+                          room.status === "IN_GAME" ? "bg-red-400" : "bg-green-400"
+                        } rounded-full mr-1`}></div>
                         <span className="text-xs text-gray-300">
                           {room.currentParticipants || room.currentPlayers || 0}/{room.maxParticipants || room.capacity || 5}
                         </span>
