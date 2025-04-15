@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { subscribe, unsubscribe, publish } from "@/lib/backend/stompClient";
 import client from "@/lib/backend/client";
 import QuizQuestion from "./QuizQuestion";
@@ -8,6 +8,7 @@ import Timer from "./Timer";
 import PlayerScores from "./PlayerScores";
 import { FaFlag, FaClock } from "react-icons/fa";
 import { RoomResponse } from "@/lib/types/room";
+import toast from 'react-hot-toast';
 
 // 퀴즈 문제 타입 정의
 interface QuizQuestionType {
@@ -55,6 +56,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   const [answerSubmitted, setAnswerSubmitted] = useState<boolean>(false);
   const [showFinalResults, setShowFinalResults] = useState<boolean>(false);
   const [quizId, setQuizId] = useState<string | null>(null);
+  const [forceRenderKey, setForceRenderKey] = useState<number>(0); // 강제 리렌더링용 키
   
   // 퀴즈 생성 진행 상태 관리
   const [quizGenerationStatus, setQuizGenerationStatus] = useState<{
@@ -74,10 +76,121 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   // 현재 문제 정보
   const currentQuestion = questions[currentQuestionIndex];
   
-  // 웹소켓 구독 설정
+  // 더미 문제 사용 함수 - useCallback으로 감싸기
+  const useDummyQuestions = useCallback(() => {
+    console.log("더미 문제 데이터 사용");
+    const dummyQuestions: QuizQuestionType[] = [
+      {
+        id: "dummy1",
+        questionNumber: 1,
+        question: "더미 문제 1: 다음 중 옳은 것은?",
+        choices: ["선택지 1", "선택지 2", "선택지 3", "선택지 4"],
+        correctAnswer: 0,
+        category: "DUMMY",
+        subCategory: "DUMMY",
+        explanation: "",
+        timeLimit: 20
+      },
+      {
+        id: "dummy2",
+        questionNumber: 2,
+        question: "더미 문제 2: 다음 중 옳은 것은?",
+        choices: ["선택지 1", "선택지 2", "선택지 3", "선택지 4"],
+        correctAnswer: 1,
+        category: "DUMMY",
+        subCategory: "DUMMY",
+        explanation: "",
+        timeLimit: 20
+      },
+      {
+        id: "dummy3",
+        questionNumber: 3,
+        question: "더미 문제 3: 다음 중 옳은 것은?",
+        choices: ["선택지 1", "선택지 2", "선택지 3", "선택지 4"],
+        correctAnswer: 2,
+        category: "DUMMY",
+        subCategory: "DUMMY",
+        explanation: "",
+        timeLimit: 20
+      },
+      {
+        id: "dummy4",
+        questionNumber: 4,
+        question: "더미 문제 4: 다음 중 옳은 것은?",
+        choices: ["선택지 1", "선택지 2", "선택지 3", "선택지 4"],
+        correctAnswer: 3,
+        category: "DUMMY",
+        subCategory: "DUMMY",
+        explanation: "",
+        timeLimit: 20
+      },
+      {
+        id: "dummy5",
+        questionNumber: 5,
+        question: "더미 문제 5: 다음 중 옳은 것은?",
+        choices: ["선택지 1", "선택지 2", "선택지 3", "선택지 4"],
+        correctAnswer: 0,
+        category: "DUMMY",
+        subCategory: "DUMMY",
+        explanation: "",
+        timeLimit: 20
+      }
+    ];
+    setQuestions(dummyQuestions);
+    setTimeLeft(20); // 첫 문제 타이머 시작
+    setCurrentQuestionIndex(0);
+  }, []);
+  
+  // 문제 데이터 가져오기 함수 - useCallback으로 감싸기
+  const fetchQuestions = useCallback(async (quizId: string) => {
+    try {
+      console.log(`퀴즈 ID ${quizId}로 문제 데이터 요청`);
+      const response = await fetch(`/api/quizzes/${quizId}/questions`);
+      if (!response.ok) {
+        throw new Error('문제 데이터 로드 실패');
+      }
+      const data = await response.json();
+      console.log("문제 데이터 로드 성공:", data);
+      setQuestions(data);
+      setTimeLeft(30); // 첫 문제 타이머 시작
+      setCurrentQuestionIndex(0);
+    } catch (error) {
+      console.error("문제 데이터 로드 중 오류:", error);
+      // 오류 발생 시 더미 문제 사용
+      useDummyQuestions();
+    }
+  }, [useDummyQuestions]);
+  
+  // 게임 종료 처리 함수
+  const handleGameEnd = () => {
+    console.log("게임 종료 처리");
+    setShowFinalResults(true);
+    // 필요한 다른 종료 처리 로직 추가
+  };
+  
+  // 플레이어 점수 초기화
+  const initializePlayerScores = () => {
+    const initialScores = players.map((player) => ({
+      id: player.id,
+      nickname: player.nickname,
+      avatarUrl: player.avatarUrl || "https://via.placeholder.com/40",
+      score: 0,
+      lastAnswerCorrect: false,
+      isReady: player.isReady
+    }));
+    
+    setPlayerScores(initialScores);
+  };
+
+  // 웹소켓 구독 설정 - 퀴즈 생성 상태를 위한 useEffect
   useEffect(() => {
+    console.log("GameContainer 마운트 시 초기 gameStatus:", gameStatus);
+    
+    // 플레이어 스코어 초기화
+    initializePlayerScores();
+    
     // 퀴즈 생성 상태 구독
-    subscribe(`/topic/room/${roomId}/quiz/generation`, (data) => {
+    const generationSubscriptionId = subscribe(`/topic/room/${roomId}/quiz/generation`, (data) => {
       console.log("퀴즈 생성 상태 수신:", data);
       setQuizGenerationStatus({
         status: data.status,
@@ -89,26 +202,88 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         animation: data.animation
       });
       
-      // 퀴즈 생성이 완료되면 게임 시작 메시지 전송
+      // 진행 상태에 따른 토스트 메시지 표시
+      if (data.status === "STARTED") {
+        toast.success("퀴즈 생성이 시작되었습니다!");
+      } else if (data.status === "IN_PROGRESS" && data.progress % 25 === 0) {
+        // 25%, 50%, 75% 진행 시에만 토스트 표시
+        toast.success(`퀴즈 생성 진행중: ${data.progress}%`);
+      }
+      
+      // 퀴즈 생성이 완료되면 게임 시작 준비
       if (data.status === "COMPLETED") {
-        console.log("퀴즈 생성이 완료되었습니다. 게임을 시작합니다.");
+        console.log("퀴즈 생성이 완료되었습니다. 게임 시작 준비 중...");
+        
+        // 완료 토스트 메시지
+        toast.success("퀴즈 생성 완료! 게임을 시작합니다.", {
+          duration: 3000,
+          icon: '🎮'
+        });
         
         // 백엔드에서 전달받은 퀴즈 ID 저장
         if (data.quizId) {
           setQuizId(data.quizId);
           console.log("백엔드에서 받은 퀴즈 ID:", data.quizId);
+          
+          // 생성된 퀴즈 ID가 있으면 더미 데이터를 사용하지 않도록 플래그 설정
+          window.sessionStorage.setItem('currentQuizId', data.quizId);
+          
+          // 이전에 사용했던 더미 퀴즈 ID 제거
+          const storedQuizId = window.sessionStorage.getItem('currentQuizId');
+          if (storedQuizId && storedQuizId.startsWith('dummy-quiz-')) {
+            window.sessionStorage.removeItem('currentQuizId');
+          }
+          
+          // 게임 시작 지연 추가
+          setTimeout(() => {
+            console.log("지연 후 게임 상태 변경: WAITING -> IN_PROGRESS");
+            // 상태 변경
+            setGameStatus("IN_PROGRESS");
+            
+            // 게임 시작 토스트 메시지
+            toast.success("게임이 시작되었습니다!", {
+              icon: '🚀',
+              duration: 3000
+            });
+            
+            // 게임 시작 메시지 발행 (상태 전환 후)
+            publish(`/app/room/${roomId}/game/start`, {
+              roomId: roomId,
+              quizId: data.quizId,
+              gameStatus: "IN_PROGRESS",
+              timestamp: Date.now()
+            });
+            
+            // 문제 데이터 로드 시작
+            if (quizId) {
+              console.log("저장된 퀴즈 ID로 문제 데이터 로드 시작:", quizId);
+              fetchQuestions(quizId);
+            } else if (data.quizId) {
+              console.log("수신된 퀴즈 ID로 문제 데이터 로드 시작:", data.quizId);
+              fetchQuestions(data.quizId);
+            }
+            
+            // 강제 리렌더링
+            setForceRenderKey(prev => prev + 1);
+          }, 2000); // 2초 지연
         }
-        
-        // 게임 시작 알림
-        publish(`/app/room/${roomId}/game/start`, {
-          roomId: roomId,
-          timestamp: Date.now()
-        });
+      } else if (data.status === "FAILED") {
+        // 실패 시 토스트 에러 메시지
+        toast.error("퀴즈 생성에 실패했습니다. 다시 시도해주세요.");
       }
     });
     
+    // 컴포넌트 언마운트 시 구독 해제
+    return () => {
+      unsubscribe(`/topic/room/${roomId}/quiz/generation`);
+      console.log("퀴즈 생성 상태 구독 해제");
+    };
+  }, [roomId, publish, quizId, fetchQuestions]);
+
+  // 문제 변경 이벤트 구독은 별도의 useEffect로 분리
+  useEffect(() => {
     // 문제 변경 이벤트 구독
-    subscribe(`/topic/room/${roomId}/question`, (data) => {
+    const questionSubscriptionId = subscribe(`/topic/room/${roomId}/question`, (data) => {
       console.log("문제 변경 이벤트 수신:", data);
       
       setCurrentQuestionIndex(data.questionIndex);
@@ -147,7 +322,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
             correctAnswer: correctAnswerIndex,
             category: "HISTORY",  // 기본값 설정 또는 서버에서 받을 경우 업데이트
             subCategory: "KOREAN_HISTORY",
-            explanation: "서버에서 제공된 문제입니다.",
+            explanation: data.explanation || "",  // 서버에서 제공된 해설 사용, 없으면 빈 문자열
             timeLimit: 15  // 기본 시간 제한
           };
           
@@ -176,203 +351,108 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         setTimeLeft(15);
         console.log("문제가 화면에 표시되었습니다:", questions[data.questionIndex].question);
       }
-    });
-    
-    // 점수 업데이트 이벤트 구독
-    subscribe(`/topic/room/${roomId}/scores`, (data) => {
-      console.log("점수 업데이트 이벤트 수신:", data);
-      
-      if (data.scores && Array.isArray(data.scores)) {
-        setPlayerScores(data.scores);
-      }
-    });
-    
-    // 방 상태 업데이트 구독 - 게임 시작/종료 및 재시작 처리를 위해
-    subscribe(`/topic/room/${roomId}/status`, (data) => {
-      console.log("방 상태 업데이트 이벤트 수신:", data);
-      
-      if (data.gameStatus) {
-        setGameStatus(data.gameStatus);
-        
-        if (data.gameStatus === 'FINISHED') {
-          setShowFinalResults(true);
-        }
-      }
       
       // quizId 업데이트
       if (data.quizId) {
         setQuizId(data.quizId);
-        // quizId가 있을 경우 해당 퀴즈의 업데이트 구독
-        subscribe(`/topic/quiz/${data.quizId}/updates`, (updateData) => {
-          console.log("퀴즈 결과 업데이트:", updateData);
-          // 여기서 플레이어 점수 업데이트 등의 처리
-          if (updateData.playerId && updateData.isCorrect !== undefined) {
-            setPlayerScores(prevScores => 
-              prevScores.map(player => {
-                if (player.id === String(updateData.playerId)) {
-                  return {
-                    ...player,
-                    score: updateData.isCorrect ? player.score + (updateData.score || 100) : player.score,
-                    lastAnswerCorrect: updateData.isCorrect
-                  };
-                }
-                return player;
-              })
-            );
-          }
-        });
+        // 세션 스토리지에 저장
+        window.sessionStorage.setItem('currentQuizId', data.quizId);
       }
     });
-    
-    // 게임 재시작 이벤트 구독
-    subscribe(`/topic/room/${roomId}/restart`, (data) => {
-      console.log("게임 재시작 이벤트 수신:", data);
-      
-      if (data.restart) {
-        resetGame();
-      }
-    });
-    
-    // 답변 이벤트 구독 - 다른 플레이어의 답변 확인
-    subscribe(`/topic/room/${roomId}/answer`, (data) => {
-      console.log("플레이어 답변 수신:", data);
-      
-      if (data.playerId && data.isCorrect !== undefined) {
-        // 플레이어 점수 업데이트
-        setPlayerScores(prevScores => 
-          prevScores.map(player => {
-            if (player.id === String(data.playerId)) {
-              return {
-                ...player,
-                score: data.isCorrect ? player.score + (data.score || 100) : player.score,
-                lastAnswerCorrect: data.isCorrect
-              };
-            }
-            return player;
-          })
-        );
-      }
-    });
-    
-    // 게임 시작 시 문제 데이터 로드
-    fetchQuestions();
-    
-    // 초기 플레이어 점수 설정
-    initializePlayerScores();
     
     return () => {
-      // 컴포넌트 언마운트 시 구독 해제
       unsubscribe(`/topic/room/${roomId}/question`);
-      unsubscribe(`/topic/room/${roomId}/scores`);
-      unsubscribe(`/topic/room/${roomId}/status`);
-      unsubscribe(`/topic/room/${roomId}/restart`);
-      unsubscribe(`/topic/room/${roomId}/answer`);
-      if (quizId) {
-        unsubscribe(`/topic/quiz/${quizId}/updates`);
-      }
+      console.log("문제 변경 이벤트 구독 해제");
     };
-  }, [roomId, quizId]);
-  
-  // 플레이어 점수 초기화
-  const initializePlayerScores = () => {
-    const initialScores = players.map((player) => ({
-      id: player.id,
-      nickname: player.nickname,
-      avatarUrl: player.avatarUrl,
-      score: 0,
-      lastAnswerCorrect: false,
-      isReady: player.isReady
-    }));
-    
-    setPlayerScores(initialScores);
-  };
-  
-  // 문제 데이터 가져오기
-  const fetchQuestions = async () => {
-    try {
-      // 웹소켓을 통해 퀴즈 생성 요청
-      publish(`/app/room/${roomId}/quiz/generate`, {
-        roomId: parseInt(roomId),
-        timestamp: Date.now()
-      });
-      
-      console.log("웹소켓을 통해 퀴즈 생성 요청 전송");
-      
-      // 백업 처리: 15초 내에 응답이 없으면 더미 데이터 사용 (20초에서 15초로 변경)
-      setTimeout(() => {
-        if (questions.length === 0 && quizGenerationStatus.status !== "COMPLETED") {
-          console.warn("퀴즈 데이터 수신 시간 초과, 임시 데이터 사용");
-          handleDummyQuestions();
+  }, [roomId, questions]);
+
+  // 문제 데이터 로딩 부분을 별도로 분리
+  useEffect(() => {
+    // 게임이 시작된 상태이고 퀴즈 ID가 있는 경우에만 문제 가져오기
+    if (gameStatus === "IN_PROGRESS" && quizId) {
+      // 백엔드에서 문제를 가져오는 함수
+      const fetchQuestions = async () => {
+        try {
+          // 세션 스토리지에서 저장된 퀴즈 ID 확인
+          const storedQuizId = window.sessionStorage.getItem('currentQuizId');
+          const finalQuizId = quizId || storedQuizId;
+          
+          if (!finalQuizId) {
+            console.log("유효한 퀴즈 ID가 없습니다.");
+            return;
+          }
+          
+          // 문제 데이터가 이미 있는 경우 다시 가져오지 않음
+          if (questions.length > 0 && questions.some(q => q != null)) {
+            console.log("이미 문제 데이터가 로드되어 있습니다.");
+            return;
+          }
+          
+          console.log(`퀴즈 ID ${finalQuizId}에 해당하는 문제 데이터 요청 중...`);
+          
+          // 백엔드에서 문제 데이터 가져오기
+          const loadTimeout = setTimeout(() => {
+            console.log("퀴즈 데이터 수신 시간 초과, 임시 데이터 사용");
+            
+            // 이미 문제 데이터가 있으면 더미 데이터를 사용하지 않음
+            if (questions.length > 0 && questions.some(q => q != null)) {
+              console.log("이미 문제 데이터가 있어 더미 데이터를 사용하지 않습니다.");
+              clearTimeout(loadTimeout);
+              return;
+            }
+            
+            // 세션 스토리지에 저장된 QuizId 체크
+            const storedQuizId = window.sessionStorage.getItem('currentQuizId');
+            if (storedQuizId && storedQuizId.startsWith('dummy-quiz-')) {
+              console.log("이미 더미 퀴즈 ID가 사용 중입니다.");
+              return;
+            }
+            
+            // 백엔드에서 문제 데이터를 받아오지 못한 경우에만 더미 데이터 생성
+            const dummyQuizId = `dummy-quiz-${Date.now()}`;
+            console.log("더미 퀴즈 ID 생성 (백엔드에서 ID를 받지 못한 경우):", dummyQuizId);
+            
+            // 더미 퀴즈 ID 저장
+            setQuizId(dummyQuizId);
+            window.sessionStorage.setItem('currentQuizId', dummyQuizId);
+            
+            // 더미 문제 데이터 생성
+            const dummyQuestions: QuizQuestionType[] = Array(5).fill(null).map((_, index) => ({
+              id: `dummy-q${index + 1}`,
+              questionNumber: index + 1,
+              question: `더미 문제 ${index + 1}: 아래 중 옳은 것은?`,
+              choices: [
+                "첫 번째 선택지",
+                "두 번째 선택지",
+                "세 번째 선택지",
+                "네 번째 선택지"
+              ],
+              correctAnswer: Math.floor(Math.random() * 4),
+              category: "DUMMY",
+              subCategory: "DUMMY",
+              explanation: "",
+              timeLimit: 20
+            }));
+            
+            // 더미 문제 데이터 설정
+            setQuestions(dummyQuestions);
+            
+            // 첫 번째 문제부터 시작
+            setCurrentQuestionIndex(0);
+            setTimeLeft(20);
+          }, 10000); // 10초 후에 타임아웃
+          
+          return () => {
+            clearTimeout(loadTimeout);
+          };
+        } catch (error) {
+          console.error("문제 데이터를 가져오는 중 오류 발생:", error);
         }
-      }, 15000);
+      };
       
-    } catch (error) {
-      console.error("퀴즈 생성 요청 중 오류 발생:", error);
-      // 오류 발생 시 임시 데이터 사용
-      handleDummyQuestions();
+      fetchQuestions();
     }
-  };
-  
-  // 임시 문제 데이터 사용 함수
-  const handleDummyQuestions = () => {
-    const dummyQuestions: QuizQuestionType[] = [
-      {
-        id: "q1",
-        questionNumber: 1,
-        question: "세계에서 가장 긴 강은 무엇일까요?",
-        choices: ["아마존 강", "나일 강", "양쯔 강", "미시시피 강"],
-        correctAnswer: 1, // 인덱스 1, 즉 "나일 강"
-        category: "GENERAL_KNOWLEDGE",
-        subCategory: "GEOGRAPHY",
-        explanation: "나일강은 길이 6,650km로 세계에서 가장 긴 강입니다.",
-        timeLimit: 15
-      },
-      {
-        id: "q2",
-        questionNumber: 2,
-        question: "대한민국의 수도는?",
-        choices: ["부산", "서울", "인천", "대전"],
-        correctAnswer: 1, // 인덱스 1, 즉 "서울"
-        category: "GENERAL_KNOWLEDGE",
-        subCategory: "GEOGRAPHY",
-        explanation: "대한민국의 수도는 서울입니다.",
-        timeLimit: 10
-      },
-      {
-        id: "q3",
-        questionNumber: 3,
-        question: "E=mc²를 제안한 과학자는?",
-        choices: ["아이작 뉴턴", "앨버트 아인슈타인", "니콜라 테슬라", "갈릴레오 갈릴레이"],
-        correctAnswer: 1, // 인덱스 1, 즉 "앨버트 아인슈타인"
-        category: "SCIENCE",
-        subCategory: "PHYSICS",
-        explanation: "질량-에너지 등가원리(E=mc²)는 앨버트 아인슈타인이 제안했습니다.",
-        timeLimit: 12
-      }
-    ];
-    
-    setQuestions(dummyQuestions);
-    setGameStatus("IN_PROGRESS");
-    
-    // 첫 번째 문제 시간 설정
-    if (dummyQuestions.length > 0) {
-      setTimeLeft(dummyQuestions[0].timeLimit);
-    }
-    
-    // 더미 데이터 사용 시에도 여전히 퀴즈 ID가 필요할 경우에만 사용
-    if (!quizId) {
-      const dummyQuizId = `dummy-quiz-${Date.now()}`;
-      setQuizId(dummyQuizId);
-      console.log("더미 퀴즈 ID 생성 (백엔드에서 ID를 받지 못한 경우):", dummyQuizId);
-    }
-    
-    // 게임 시작 알림
-    publish(`/app/room/${roomId}/game/start`, {
-      roomId: roomId,
-      timestamp: Date.now(),
-      quizId: quizId || `dummy-quiz-${Date.now()}`  // 퀴즈 ID가 없는 경우에만 더미 ID 생성
-    });
-  };
+  }, [gameStatus, quizId, questions]);
   
   // 답변 제출 처리
   const handleSubmitAnswer = (answer: string) => {
@@ -517,20 +597,18 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         timestamp: Date.now()
       });
       
-      // 서버에 결과 저장 API 호출
-      try {
-        await (client.POST as any)(`/api/v1/rooms/${roomId}/finish`, {
-          body: {
-            scores: playerScores.map(player => ({
-              playerId: player.id,
-              score: player.score
-            }))
-          }
-        });
-        console.log("게임 결과가 서버에 저장되었습니다.");
-      } catch (error) {
-        console.error("게임 결과 저장 중 오류 발생:", error);
-      }
+      // 최종 점수 정보
+      const finalScores = playerScores.map(player => ({
+        playerId: player.id,
+        score: player.score
+      }));
+      
+      // 서버에 결과 저장 (웹소켓으로 전송 - API 대신)
+      publish(`/app/room/${roomId}/finish`, {
+        roomId: roomId,
+        scores: finalScores,
+        timestamp: Date.now()
+      });
       
       // 최종 결과 브로드캐스트
       publish(`/app/room/${roomId}/scores`, {
@@ -641,6 +719,79 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     });
   };
   
+  // 방 상태 업데이트 구독
+  useEffect(() => {
+    const statusSubscriptionId = subscribe(`/topic/room/${roomId}/status`, (data) => {
+      console.log("방 상태 업데이트 수신:", data);
+      
+      // gameStatus 필드가 있는 경우 게임 상태 업데이트 처리
+      if (data.gameStatus) {
+        console.log(`게임 상태 업데이트: ${gameStatus} -> ${data.gameStatus}`);
+        
+        // 대소문자 및 다양한 형식 지원
+        const newStatus = data.gameStatus.toUpperCase();
+        let finalStatus: "WAITING" | "IN_PROGRESS" | "FINISHED" = gameStatus;
+        
+        if (newStatus === "IN_PROGRESS" || newStatus === "IN_GAME") {
+          finalStatus = "IN_PROGRESS";
+          console.log("게임 상태 IN_PROGRESS로 설정");
+        } else if (newStatus === "FINISHED" || newStatus === "COMPLETE" || newStatus === "COMPLETED") {
+          finalStatus = "FINISHED";
+          console.log("게임 상태 FINISHED로 설정");
+        } else if (newStatus === "WAITING" || newStatus === "READY") {
+          finalStatus = "WAITING";
+          console.log("게임 상태 WAITING으로 설정");
+        }
+        
+        // 게임 상태가 실제로 변경되는 경우에만 업데이트
+        if (finalStatus !== gameStatus) {
+          console.log(`게임 상태 실제 변경: ${gameStatus} -> ${finalStatus}`);
+          // 게임 상태 업데이트
+          setGameStatus(finalStatus);
+          
+          // 게임이 시작되면 문제 로드 및 타이머 시작
+          if (finalStatus === "IN_PROGRESS") {
+            // 퀴즈 ID를 이용하여 문제 로드
+            if (quizId) {
+              console.log("저장된 퀴즈 ID로 문제 데이터 로드:", quizId);
+              fetchQuestions(quizId);
+            } else {
+              // 세션 스토리지에서 저장된 퀴즈 ID 확인
+              const storedQuizId = window.sessionStorage.getItem('currentQuizId');
+              if (storedQuizId) {
+                console.log("세션 스토리지에서 퀴즈 ID 복원:", storedQuizId);
+                setQuizId(storedQuizId);
+                fetchQuestions(storedQuizId);
+              } else {
+                console.log("퀴즈 ID가 없어 더미 문제를 사용합니다.");
+                useDummyQuestions(); // 퀴즈 ID가 없는 경우 더미 문제 사용
+              }
+            }
+          }
+          
+          // 게임이 종료되면 최종 결과 표시
+          if (finalStatus === "FINISHED") {
+            handleGameEnd();
+          }
+          
+          // 강제 리렌더링
+          setForceRenderKey(prev => prev + 1);
+        }
+      }
+      // 기존 상태 업데이트 로직 유지
+      else if (data.status) {
+        // 기존 코드 유지
+      } else {
+        console.warn("방 상태 업데이트: 지원되지 않는 메시지 형식", data);
+      }
+    });
+    
+    return () => {
+      unsubscribe(`/topic/room/${roomId}/status`);
+      console.log("방 상태 구독 해제");
+    };
+  }, [roomId, gameStatus, quizId, fetchQuestions, useDummyQuestions, subscribe, unsubscribe]);
+  
   // 게임 대기 화면
   if (gameStatus === "WAITING") {
     return (
@@ -736,6 +887,21 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
               ))}
             </div>
           </div>
+          
+          {/* 게임 시작 준비 중 메시지 - 생성 완료 시 표시 */}
+          {quizGenerationStatus.status === "COMPLETED" && (
+            <div className="mt-6 text-center">
+              <div className="text-lg font-medium text-white mb-2">게임 시작 준비 완료!</div>
+              <div className="text-sm text-gray-400">잠시 후 게임이 자동으로 시작됩니다...</div>
+              <div className="mt-3 flex justify-center">
+                <div className="inline-flex space-x-2">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping" style={{ animationDelay: '0.3s' }}></div>
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping" style={{ animationDelay: '0.6s' }}></div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

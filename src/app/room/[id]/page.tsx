@@ -315,6 +315,31 @@ export default function RoomPage() {
       } else if (data && typeof data === 'object') {
         // 단순 객체인 경우 (room 정보만 담긴 형태) - 기존 방 정보 유지
         console.log("단순 객체 형태의 데이터 수신");
+        
+        // gameStatus가 있으면 게임 상태 처리
+        if (data.gameStatus) {
+          console.log(`게임 상태 메시지 수신: ${data.gameStatus}`);
+          
+          if (data.gameStatus === 'IN_PROGRESS' || data.gameStatus === 'IN_GAME') {
+            setGameStatus('IN_GAME');
+            
+            // 방 상태도 함께 업데이트
+            setRoom(prev => {
+              if (!prev) return prev;
+              return { 
+                ...prev, 
+                status: 'IN_GAME'
+              };
+            });
+          } else if (data.gameStatus === 'FINISHED') {
+            setGameStatus('WAITING');
+          }
+          
+          // 로직 처리 후 return으로 종료하여 추가 처리 방지
+          return;
+        }
+        
+        // gameStatus 필드가 없는 경우 기존 방 정보 업데이트
         setRoom(prev => {
           if (!prev) return data;
           return { ...prev, ...data };
@@ -955,11 +980,11 @@ export default function RoomPage() {
             // 완료 메시지 전송
             publish(`/app/room/chat/${roomId}`, {
               type: "SYSTEM",
-              content: "문제 생성 완료! 곧 게임이 시작됩니다.",
+              content: "문제 생성 완료! 3초 후 게임이 시작됩니다.",
               timestamp: Date.now()
             });
             
-            // 게임 상태 업데이트
+            // 게임 시작 상태로 즉시 업데이트
             setGameStatus('IN_GAME');
             
             // 방 상태 업데이트
@@ -972,16 +997,29 @@ export default function RoomPage() {
                 status: 'IN_GAME' as "WAITING" | "IN_GAME" | "FINISHED" 
               };
               
-              // 상태 브로드캐스트
+              return updatedRoom;
+            });
+            
+            // 상태 브로드캐스트를 약간의 지연 후 수행하여 UI가 먼저 업데이트되도록 함
+            setTimeout(() => {
               publish(`/app/room/${roomId}/status`, {
-                room: updatedRoom,
+                room: {
+                  ...room,
+                  status: 'IN_GAME'
+                },
                 players: players,
                 gameStatus: 'IN_GAME',
                 timestamp: Date.now()
               });
               
-              return updatedRoom;
-            });
+              // 게임 시작 메시지도 추가로 전송
+              publish(`/app/room/${roomId}/game/start`, {
+                roomId: roomId,
+                quizId: data.quizId,
+                gameStatus: 'IN_GAME',
+                timestamp: Date.now()
+              });
+            }, 1000);
           } else if (data.status === "FAILED") {
             // 실패 시 에러 메시지 표시
             publish(`/app/room/chat/${roomId}`, {
