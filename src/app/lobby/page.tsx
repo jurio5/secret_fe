@@ -1575,7 +1575,7 @@ function LobbyContent({
                 }
               }
             } else if (message.location === "IN_LOBBY") {
-              console.log(`[CLEAR-TRACE] ${message.senderName}님이 로비로 돌아왔습니다. 상태=${message.status || "로비"}`);
+              console.log(`[CLEAR-TRACE] ${message.senderName}님이 로비로 돌아왔습니다. 상태=${message.status || "대기중"}`);
             }
           }
           
@@ -1734,12 +1734,12 @@ const initializeWebSocket = async () => {
     
     // 연결 성공 시 본인 상태를 로비에 업데이트
     console.log("[INIT] 로비 상태 업데이트 전송");
-    await safePublish('/app/lobby/status', {
-      type: "STATUS_UPDATE",
-      status: "로비",
-      location: "IN_LOBBY",
-      roomId: null,
-      timestamp: Date.now()
+      await safePublish('/app/lobby/status', {
+        type: "STATUS_UPDATE",
+        status: "로비",
+        location: "IN_LOBBY",
+        roomId: null,
+        timestamp: Date.now()
     });
   } catch (error) {
     console.error("[ERROR] WebSocket 초기화 중 오류 발생:", error);
@@ -1818,6 +1818,18 @@ const initializeWebSocket = async () => {
           setIsJoiningRoom(false);
           return;
         }
+        
+        // 게임 중인 방인지 확인
+        if (selectedRoom.status === "IN_GAME") {
+          // 게임 중인 방이면 알림 표시 후 함수 종료
+          setToast({
+            type: "error",
+            message: "게임이 진행 중인 방에는 입장할 수 없습니다.",
+            duration: 3000
+          });
+          setIsJoiningRoom(false);
+          return;
+        }
       }
       
       if (password) {
@@ -1825,13 +1837,59 @@ const initializeWebSocket = async () => {
         await client.POST(`/api/v1/rooms/{roomId}/join`, {
           params: { path: { roomId: parseInt(roomId) } },
           body: { password } as any
-        });
-      } else {
+      });
+    } else {
         // 공개 방인 경우
         await client.POST(`/api/v1/rooms/{roomId}/join`, {
           params: { path: { roomId: parseInt(roomId) } }
         });
+    }
+
+      // 방 입장 시 사용자 위치 상태를 명시적으로 업데이트
+      if (currentUser) {
+        // 여러 채널에 위치 정보 변경 알림
+        const { safePublish } = await import('@/lib/backend/stompClient');
+        
+        // 1. 사용자의 상태 메시지를 즉시 로비에 발행 (대기중으로 명시)
+        const userStatusUpdate = {
+          type: "USER_LOCATION_UPDATE",
+          status: "대기중",
+          location: "IN_ROOM",
+          roomId: parseInt(roomId),
+          userId: currentUser.id,
+          nickname: currentUser.nickname,
+          senderId: currentUser.id.toString(),
+          senderName: currentUser.nickname,
+          timestamp: Date.now()
+        };
+        
+        // 여러 채널에 상태 변경 메시지 발행
+        const channels = [
+          '/app/lobby/users/update',
+          '/app/lobby/status',
+          '/app/lobby/broadcast'
+        ];
+        
+        // 모든 채널에 상태 메시지 발행 (여러번 발행하여 메시지 전달 확실히 함)
+        for (const channel of channels) {
+          await safePublish(channel, userStatusUpdate);
+          console.log(`사용자 상태 메시지 발행: ${channel}`, userStatusUpdate);
+        }
+        
+        // 2. 웹 스토리지에 상태 정보 저장 (방 입장 후 상태 복원용)
+        localStorage.setItem('user_room_state', JSON.stringify({
+          roomId: parseInt(roomId),
+          status: "대기중",
+          location: "IN_ROOM",
+          timestamp: Date.now()
+        }));
+        
+        console.log("방 입장 전 사용자 상태를 '대기중'으로 업데이트");
       }
+      
+      // 약간의 딜레이를 두어 상태 메시지가 처리되도록 함
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       // 방 입장 성공
       localStorage.setItem('intentional_navigation', 'true');
       window.location.href = `/room/${roomId}`;
@@ -2297,10 +2355,12 @@ const initializeWebSocket = async () => {
                       <div className="flex items-center justify-between">
                         <div className="text-xs text-gray-400">
                           {user.location === "IN_ROOM" 
-                            ? `게임중 ${user.roomId ? `(${user.roomId}번방)` : ''}` 
-                            : user.status === "online" ? "로비" : user.status}
+                            ? (user.status === "게임중" 
+                              ? `게임중 ${user.roomId ? `(${user.roomId}번방)` : ''}` 
+                              : `대기중 ${user.roomId ? `(${user.roomId}번방)` : ''}`)
+                            : user.status === "online" ? "대기중" : user.status}
                         </div>
-                        {user.location === "IN_ROOM" && user.roomId && (
+                        {user.location === "IN_ROOM" && user.roomId && user.status !== "게임중" && (
                           <button 
                             className="text-xs px-1.5 py-0.5 bg-blue-900/30 text-blue-400 rounded-md hover:bg-blue-900/50"
                             onClick={(e) => {
@@ -3185,6 +3245,7 @@ const initializeWebSocket = async () => {
               </button>
             </form>
           </div>
+
         </div>
       )}
     </div>
