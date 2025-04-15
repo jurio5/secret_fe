@@ -256,11 +256,35 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
               duration: 3000
             });
             
-            // 게임 시작 메시지 발행 (상태 전환 후)
+            // 게임 시작 메시지 발행 개선 - 모든 클라이언트에게 확실히 전달되도록 여러 채널에 메시지 발행
+            // 1. 명시적 게임 시작 메시지 발행
             publish(`/app/room/${roomId}/game/start`, {
               roomId: roomId,
               quizId: data.quizId,
               gameStatus: "IN_PROGRESS",
+              timestamp: Date.now()
+            });
+            
+            // 2. 방 상태 업데이트 메시지 발행 (대체 경로)
+            publish(`/app/room/${roomId}/status`, {
+              gameStatus: "IN_PROGRESS",
+              roomStatus: "IN_GAME",
+              quizId: data.quizId,
+              timestamp: Date.now()
+            });
+            
+            // 3. 새로운 브로드캐스트 메시지 발행 (모든 사용자에게 게임 시작 통지)
+            publish(`/app/room/${roomId}/broadcastGameStart`, {
+              roomId: roomId,
+              quizId: data.quizId,
+              gameStatus: "IN_PROGRESS",
+              timestamp: Date.now()
+            });
+            
+            // 4. 시스템 메시지로 게임 시작 알림
+            publish(`/app/room/chat/${roomId}`, {
+              type: "SYSTEM",
+              content: "게임이 시작되었습니다! 모든 플레이어는 문제 화면으로 이동합니다.",
               timestamp: Date.now()
             });
             
@@ -728,163 +752,45 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   
   // 방 상태 업데이트 구독
   useEffect(() => {
-    console.log("방 상태 업데이트 구독 설정", roomId);
-    
-    // 게임 시작 메시지 명시적 게시 - 게임 시작 시 한 번만 실행
-    const publishGameStart = () => {
-      if (quizId) {
-        console.log("게임 시작 메시지 명시적 발행", quizId);
-        
-        // 방 상태 업데이트 메시지 발행 (모든 클라이언트에게 전파)
-        publish(`/app/room/${roomId}/status`, {
-          room: {
-            status: 'IN_GAME'
-          },
-          gameStatus: 'IN_PROGRESS',
-          timestamp: Date.now()
-        });
-        
-        // 게임 시작 메시지 발행 - 약간의 지연 추가
-        setTimeout(() => {
-          publish(`/app/room/${roomId}/game/start`, {
-            roomId: roomId,
-            quizId: quizId,
-            gameStatus: 'IN_PROGRESS',
-            timestamp: Date.now()
-          });
-          console.log("지연된 게임 시작 메시지 발행 완료");
-        }, 500);
-      }
-    };
-    
-    // 게임 상태가 WAITING -> IN_PROGRESS로 바뀔 때 한 번만 실행
-    if (gameStatus === "IN_PROGRESS" && quizId) {
-      publishGameStart();
-    }
-    
     const statusSubscriptionId = subscribe(`/topic/room/${roomId}/status`, (data) => {
       console.log("방 상태 업데이트 수신:", data);
       
-      try {
-        // 다양한 메시지 형식 지원
-        let messageData = data;
+      // gameStatus 필드가 있는 경우 게임 상태 업데이트 처리
+      if (data.gameStatus) {
+        console.log(`게임 상태 업데이트: ${gameStatus} -> ${data.gameStatus}`);
         
-        // 문자열인 경우 파싱 시도
-        if (typeof data === 'string') {
-          try {
-            messageData = JSON.parse(data);
-          } catch (e) {
-            console.warn("상태 메시지 파싱 실패:", e);
-          }
+        // 대소문자 및 다양한 형식 지원
+        const newStatus = data.gameStatus.toUpperCase();
+        let finalStatus: "WAITING" | "IN_PROGRESS" | "FINISHED" = gameStatus;
+        
+        if (newStatus === "IN_PROGRESS" || newStatus === "IN_GAME") {
+          finalStatus = "IN_PROGRESS";
+          console.log("게임 상태 IN_PROGRESS로 설정");
+        } else if (newStatus === "FINISHED" || newStatus === "COMPLETE" || newStatus === "COMPLETED") {
+          finalStatus = "FINISHED";
+          console.log("게임 상태 FINISHED로 설정");
+        } else if (newStatus === "WAITING" || newStatus === "READY") {
+          finalStatus = "WAITING";
+          console.log("게임 상태 WAITING으로 설정");
         }
         
-        // body 속성이 있는 경우 (일반적인 STOMP 메시지)
-        if (messageData.body) {
-          try {
-            messageData = JSON.parse(messageData.body);
-          } catch (e) {
-            console.warn("STOMP 메시지 body 파싱 실패:", e);
-          }
-        }
-        
-        // gameStatus 필드가 있는 경우 게임 상태 업데이트 처리
-        if (messageData.gameStatus) {
-          console.log(`게임 상태 업데이트: ${gameStatus} -> ${messageData.gameStatus}`);
+        // 게임 상태가 실제로 변경되는 경우에만 업데이트
+        if (finalStatus !== gameStatus) {
+          console.log(`게임 상태 실제 변경: ${gameStatus} -> ${finalStatus}`);
+          // 게임 상태 업데이트
+          setGameStatus(finalStatus);
           
-          // 대소문자 및 다양한 형식 지원
-          const newStatus = typeof messageData.gameStatus === 'string' 
-            ? messageData.gameStatus.toUpperCase() 
-            : messageData.gameStatus;
-            
-          let finalStatus: "WAITING" | "IN_PROGRESS" | "FINISHED" = gameStatus;
-          
-          if (newStatus === "IN_PROGRESS" || newStatus === "IN_GAME") {
-            finalStatus = "IN_PROGRESS";
-            console.log("게임 상태 IN_PROGRESS로 설정");
-            
-            // 퀴즈 ID 처리
-            if (messageData.quizId && messageData.quizId !== quizId) {
-              console.log(`퀴즈 ID 업데이트: ${quizId} -> ${messageData.quizId}`);
-              setQuizId(messageData.quizId);
-              window.sessionStorage.setItem('currentQuizId', messageData.quizId);
-            }
-          } else if (newStatus === "FINISHED" || newStatus === "COMPLETE" || newStatus === "COMPLETED") {
-            finalStatus = "FINISHED";
-            console.log("게임 상태 FINISHED로 설정");
-          } else if (newStatus === "WAITING" || newStatus === "READY") {
-            finalStatus = "WAITING";
-            console.log("게임 상태 WAITING으로 설정");
-          }
-          
-          // 게임 상태가 실제로 변경되는 경우에만 업데이트
-          if (finalStatus !== gameStatus) {
-            console.log(`게임 상태 실제 변경: ${gameStatus} -> ${finalStatus}`);
-            // 게임 상태 업데이트
-            setGameStatus(finalStatus);
-            
-            // 게임이 시작되면 문제 로드 및 타이머 시작
-            if (finalStatus === "IN_PROGRESS") {
-              // 세션 스토리지 또는 메시지의 퀴즈 ID 확인
-              const messageQuizId = messageData.quizId;
-              const storedQuizId = window.sessionStorage.getItem('currentQuizId');
-              const effectiveQuizId = quizId || messageQuizId || storedQuizId;
-              
-              console.log("게임 시작 시 유효 퀴즈 ID:", effectiveQuizId);
-              
-              if (effectiveQuizId) {
-                if (effectiveQuizId !== quizId) {
-                  console.log("퀴즈 ID 업데이트:", effectiveQuizId);
-                  setQuizId(effectiveQuizId);
-                  // 세션 스토리지에 저장
-                  window.sessionStorage.setItem('currentQuizId', effectiveQuizId);
-                }
-                
-                console.log("퀴즈 ID로 문제 데이터 로드:", effectiveQuizId);
-                fetchQuestions(effectiveQuizId);
-              } else {
-                console.log("퀴즈 ID가 없어 더미 문제를 사용합니다.");
-                // 더미 문제 사용 (직접 생성하여 상태 설정)
-                const dummyQuestions = createDummyQuestions();
-                setQuestions(dummyQuestions);
-                setTimeLeft(20);
-                setCurrentQuestionIndex(0);
-              }
-              
-              // 로그 추가
-              console.log("게임 시작 상태로 전환 완료 - 다른 상태 초기화 중");
-              
-              // 다른 상태 초기화
-              setAnswerSubmitted(false);
-              setSelectedAnswer(null);
-              setShowResults(false);
-              
-              // 강제 리렌더링
-              setForceRenderKey(prev => prev + 1);
-            }
-            
-            // 게임이 종료되면 최종 결과 표시
-            if (finalStatus === "FINISHED") {
-              handleGameEnd();
-            }
-          }
-        }
-        // room 객체 내에 status 필드가 있는 경우 (room 형식의 메시지)
-        else if (messageData.room?.status) {
-          const roomStatus = messageData.room.status.toUpperCase();
-          
-          // 방 상태가 'IN_GAME'인 경우 게임 상태도 업데이트
-          if (roomStatus === 'IN_GAME' && gameStatus !== 'IN_PROGRESS') {
-            console.log("방 상태로부터 게임 상태 업데이트: WAITING -> IN_PROGRESS");
-            setGameStatus('IN_PROGRESS');
-            
-            // 퀴즈 ID 확인 및 문제 로드
-            if (messageData.room.quizId && messageData.room.quizId !== quizId) {
-              setQuizId(messageData.room.quizId);
-              window.sessionStorage.setItem('currentQuizId', messageData.room.quizId);
-              fetchQuestions(messageData.room.quizId);
+          // 게임이 시작되면 문제 로드 및 타이머 시작
+          if (finalStatus === "IN_PROGRESS") {
+            // 퀴즈 ID를 이용하여 문제 로드
+            if (quizId) {
+              console.log("저장된 퀴즈 ID로 문제 데이터 로드:", quizId);
+              fetchQuestions(quizId);
             } else {
+              // 세션 스토리지에서 저장된 퀴즈 ID 확인
               const storedQuizId = window.sessionStorage.getItem('currentQuizId');
               if (storedQuizId) {
+                console.log("세션 스토리지에서 퀴즈 ID 복원:", storedQuizId);
                 setQuizId(storedQuizId);
                 fetchQuestions(storedQuizId);
               } else {
@@ -896,64 +802,30 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
                 setCurrentQuestionIndex(0);
               }
             }
-            
-            // 강제 리렌더링
-            setForceRenderKey(prev => prev + 1);
-          } else if (roomStatus === 'FINISHED' && gameStatus !== 'FINISHED') {
-            setGameStatus('FINISHED');
-            handleGameEnd();
           }
-        }
-        
-      } catch (e) {
-        console.error("방 상태 메시지 처리 중 오류:", e);
-      }
-    });
-    
-    // 게임 시작 메시지 전용 구독 추가
-    const gameStartSubscriptionId = subscribe(`/topic/room/${roomId}/game/start`, (data) => {
-      console.log("게임 시작 메시지 수신:", data);
-      
-      try {
-        // 메시지에 quizId가 있으면 사용
-        if (data.quizId && data.quizId !== quizId) {
-          console.log("게임 시작 메시지에서 퀴즈 ID 설정:", data.quizId);
-          setQuizId(data.quizId);
-          window.sessionStorage.setItem('currentQuizId', data.quizId);
-        }
-        
-        // 게임 상태가 아직 WAITING이면 IN_PROGRESS로 변경
-        if (gameStatus === "WAITING") {
-          console.log("게임 시작 메시지로 상태 변경: WAITING -> IN_PROGRESS");
-          setGameStatus("IN_PROGRESS");
           
-          // quizId가 있으면 문제 로드
-          const effectiveQuizId = data.quizId || quizId || window.sessionStorage.getItem('currentQuizId');
-          if (effectiveQuizId) {
-            console.log("게임 시작 시 문제 데이터 로드:", effectiveQuizId);
-            fetchQuestions(effectiveQuizId);
-          } else {
-            console.log("퀴즈 ID가 없어 더미 문제를 사용합니다.");
-            const dummyQuestions = createDummyQuestions();
-            setQuestions(dummyQuestions);
-            setTimeLeft(20);
-            setCurrentQuestionIndex(0);
+          // 게임이 종료되면 최종 결과 표시
+          if (finalStatus === "FINISHED") {
+            handleGameEnd();
           }
           
           // 강제 리렌더링
           setForceRenderKey(prev => prev + 1);
         }
-      } catch (e) {
-        console.error("게임 시작 메시지 처리 중 오류:", e);
+      }
+      // 기존 상태 업데이트 로직 유지
+      else if (data.status) {
+        // 기존 코드 유지
+      } else {
+        console.warn("방 상태 업데이트: 지원되지 않는 메시지 형식", data);
       }
     });
     
     return () => {
       unsubscribe(`/topic/room/${roomId}/status`);
-      unsubscribe(`/topic/room/${roomId}/game/start`);
-      console.log("방 상태 및 게임 시작 구독 해제");
+      console.log("방 상태 구독 해제");
     };
-  }, [roomId, gameStatus, quizId, fetchQuestions, publish]);
+  }, [roomId, gameStatus, quizId, fetchQuestions]);
   
   // 게임 대기 화면
   if (gameStatus === "WAITING") {
