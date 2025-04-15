@@ -33,6 +33,9 @@ interface PlayerScore {
   isReady?: boolean;
 }
 
+// 게임 상태 타입 정의 수정
+type GameStatus = "WAITING" | "IN_PROGRESS" | "FINISHED" | "LOADING_NEXT_QUESTION";
+
 interface GameContainerProps {
   roomId: string;
   currentUserId: string | number;
@@ -46,7 +49,7 @@ interface GameContainerProps {
 
 export default function GameContainer({ roomId, currentUserId, players, room, onGameEnd, publish, subscribe, unsubscribe }: GameContainerProps) {
   // 게임 상태 관리
-  const [gameStatus, setGameStatus] = useState<"WAITING" | "IN_PROGRESS" | "FINISHED">("WAITING");
+  const [gameStatus, setGameStatus] = useState<GameStatus>("WAITING");
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [questions, setQuestions] = useState<QuizQuestionType[]>([]);
   const [playerScores, setPlayerScores] = useState<PlayerScore[]>([]);
@@ -75,6 +78,14 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     lastMessage: "",
   });
   
+  // 미반영 점수를 저장하는 상태 추가
+  const [pendingScores, setPendingScores] = useState<{
+    [playerId: string]: { score: number; isCorrect: boolean }
+  }>({});
+  
+  // 현재 라운드에 응답한 플레이어 수 추적
+  const [respondedPlayers, setRespondedPlayers] = useState<Set<string>>(new Set());
+  
   // 현재 문제 정보
   const currentQuestion = questions[currentQuestionIndex];
   
@@ -84,7 +95,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   const [timeoutExecuted, setTimeoutExecuted] = useState<boolean>(false);
   
   // 플레이어 선택 추적을 위한 상태 추가
-  const [playerChoices, setPlayerChoices] = useState<Record<string, { nickname: string, answerId: number, avatarUrl?: string }>>({});
+  const [playerChoices, setPlayerChoices] = useState<Record<string, { nickname: string; answerId: number; avatarUrl?: string }>>({});
   
   // 더미 문제 생성 함수 (훅 아님)
   const createDummyQuestions = () => {
@@ -697,111 +708,218 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     };
   }, [gameStatus, quizId, questions, publish, roomId, timeoutExecuted]);
   
-  // 타이머 만료 처리
-  const handleTimerExpired = () => {
-    if (!answerSubmitted) {
-      setAnswerSubmitted(true);
+  // 플레이어 점수 업데이트
+  const updatePlayerScore = (isCorrect: boolean) => {
+    // 점수 계산
+    const scoreIncrease = isCorrect ? calculateScore() : 0;
+    
+    // 현재 플레이어 ID
+    const playerId = currentUserId.toString();
+    
+    // pendingScores에 정답 상태와 점수 저장
+    setPendingScores(prev => ({
+      ...prev,
+      [playerId]: { score: scoreIncrease, isCorrect }
+    }));
+    
+    // 응답한 플레이어 목록에 추가
+    setRespondedPlayers(prev => {
+      const newSet = new Set(prev);
+      newSet.add(playerId);
+      return newSet;
+    });
+    
+    // 모든 플레이어가 응답했는지 확인 (인원수가 2명 이상일 때만)
+    if (playerScores.length > 1) {
+      const totalPlayers = playerScores.length;
+      // 현재 플레이어를 포함하여 응답한 플레이어 수
+      const respondedCount = respondedPlayers.size + 1;
       
-      // 시간 초과로 자동 오답 처리
-      publish(`/app/room/${roomId}/answer`, {
-        questionId: currentQuestion?.id,
-        playerId: currentUserId,
-        answer: null,
-        isCorrect: false,
-        timestamp: Date.now()
-      });
+      console.log(`응답한 플레이어: ${respondedCount}/${totalPlayers}`);
       
-      // API로 시간 초과 제출
-      if (currentQuestion) {
-        submitAnswerToServer(currentQuestion.id, "TIMEOUT", false);
+      // 모든 플레이어가 응답했으면 점수 반영
+      if (respondedCount >= totalPlayers) {
+        console.log("모든 플레이어 응답 완료, 점수 일괄 반영");
+        setTimeout(() => {
+          applyPendingScores();
+        }, 1000); // 약간의 딜레이를 두고 점수 반영
       }
-      
-      // 로컬 상태 업데이트
-      setPlayerScores(prevScores => 
-        prevScores.map(player => 
-          player.id === currentUserId.toString() 
-            ? { ...player, lastAnswerCorrect: false }
-            : player
-        )
-      );
-      
-      // 시간 초과 메시지
+    }
+  };
+  
+  // 미반영 점수 일괄 반영 함수
+  const applyPendingScores = () => {
+    // 실제 점수 반영
+    setPlayerScores(prevScores => 
+      prevScores.map(player => {
+        const pending = pendingScores[player.id];
+        
+        if (pending) {
+          return { 
+            ...player, 
+            score: player.score + pending.score, 
+            lastAnswerCorrect: pending.isCorrect 
+          };
+        }
+        return player;
+      })
+    );
+    
+    // 정답자 메시지 전송 (자신의 정답 상태만 전송)
+    const currentPlayerPending = pendingScores[currentUserId.toString()];
+    if (currentPlayerPending && currentPlayerPending.isCorrect && currentPlayerPending.score > 0) {
+      // 정답 맞춘 메시지
       publish(`/app/room/chat/${roomId}`, {
         type: "SYSTEM",
-        content: `${playerScores.find(p => p.id === currentUserId.toString())?.nickname || '플레이어'}님이 시간 초과되었습니다.`,
+        content: `${playerScores.find(p => p.id === currentUserId.toString())?.nickname || '플레이어'}님이 정답을 맞추었습니다! +${currentPlayerPending.score}점`,
         timestamp: Date.now()
       });
     }
     
+    // pendingScores 초기화
+    setPendingScores({});
+    // 응답 플레이어 초기화
+    setRespondedPlayers(new Set());
+  };
+  
+  // 마지막 문제 판단 함수 추가
+  const isLastQuestionCheck = () => {
+    // 세 가지 조건 중 하나라도 참이면 마지막 문제로 간주
+    const totalProblems = room?.problemCount || questions.length;
+    const serverMarkedAsLast = window.sessionStorage.getItem('isLastQuestion') === 'true';
+    const indexBasedCheck = currentQuestionIndex >= (totalProblems - 1);
+    
+    const isLast = serverMarkedAsLast || indexBasedCheck;
+    console.log(`마지막 문제 체크: 서버 표시=${serverMarkedAsLast}, 인덱스 기반=${indexBasedCheck}, 현재=${currentQuestionIndex}, 총=${totalProblems}`);
+    
+    return isLast;
+  };
+
+  // 타이머 만료 처리 - 최대한 단순화
+  const handleTimerExpired = () => {
+    console.log("타이머 만료!");
+    
+    // 시간 초과 처리
+    setAnswerSubmitted(true);
+    
     // 결과 표시
     setShowResults(true);
     
-    // 서버에 결과 표시 알림
-    publish(`/app/room/${roomId}/question/result`, {
-      roomId: roomId,
-      questionIndex: currentQuestionIndex,
+    // 서버에 시간 초과 메시지 전송
+    publish(`/app/room/${roomId}/answer`, {
+      questionId: currentQuestion?.id || `q${currentQuestionIndex+1}`,
+      playerId: currentUserId,
+      answer: -1, // -1은 시간 초과 표시
+      isCorrect: false,
       timestamp: Date.now()
     });
     
-    console.log(`문제 ${currentQuestionIndex} 결과 표시 중, 곧 다음 문제로 자동 이동합니다`);
+    // 중요: 점수 계산 로직 추가 (시간 초과는 오답 처리)
+    if (typeof updatePlayerScore === 'function') {
+      updatePlayerScore(false);
+    }
     
-    // 현재 문제가 마지막 문제인지 확인
-    const isLastQuestion = currentQuestionIndex + 1 >= (room?.problemCount || 5) || 
-                           window.sessionStorage.getItem('isLastQuestion') === 'true';
+    // 마지막 문제인지 확인 (정확한 판별)
+    const totalProblems = room?.problemCount || questions.length || 5;
     
-    // 일정 시간 후 자동으로 다음 문제로 이동 또는 게임 종료
+    // 인덱스 기반 확인 (0-based index이므로 마지막 문제는 totalProblems-1)
+    const isLastQuestion = currentQuestionIndex >= totalProblems - 1;
+    
+    console.log(`타이머 만료: 현재 인덱스=${currentQuestionIndex}, 문제 총 개수=${totalProblems}, 마지막 문제=${isLastQuestion}`);
+    
+    // 3초 후 자동으로 다음 문제로 이동 또는 게임 종료
     setTimeout(() => {
       if (isLastQuestion) {
+        // 마지막 문제면 게임 종료 처리
         console.log("마지막 문제였습니다. 게임을 종료합니다.");
         finishGame();
       } else {
+        // 그렇지 않으면 다음 문제로 강제 이동
         console.log("다음 문제로 자동 이동합니다.");
         moveToNextQuestion();
       }
-    }, 5000); // 5초 후 자동 이동
+    }, 3000);
   };
   
-  // 답변 제출 처리
-  const handleSubmitAnswer = (answer: string) => {
-    if (answerSubmitted) return;
-
-    setSelectedAnswer(answer);
+  // 다음 문제로 이동 - 단순화 및 개선
+  const moveToNextQuestion = () => {
+    const nextIndex = currentQuestionIndex + 1;
+    console.log(`다음 문제로 이동 시작: ${currentQuestionIndex} -> ${nextIndex}`);
+    
+    // 화면 리셋
+    setSelectedAnswer(null);
+    setAnswerSubmitted(false);
+    setShowResults(false);
+    setRespondedPlayers(new Set()); // 응답 플레이어 초기화 추가
+    
+    // 인덱스 업데이트
+    setCurrentQuestionIndex(nextIndex);
+    
+    // 다음 문제 요청 (roomId도 포함)
+    publish(`/app/room/${roomId}/question/next`, {
+      roomId: roomId,
+      currentQuestionIndex: currentQuestionIndex,
+      nextQuestionIndex: nextIndex,
+      timestamp: Date.now()
+    });
+    
+    // 다음 문제로 이동했다는 채팅 메시지 추가
+    publish(`/app/room/chat/${roomId}`, {
+      type: "SYSTEM",
+      content: `문제 ${nextIndex + 1} 시작!`,
+      timestamp: Date.now()
+    });
+  };
+  
+  // 답변 제출 핸들러
+  const handleSubmitAnswer = (answerId: string | number) => {
+    if (answerSubmitted) return; // 이미 답변을 제출했으면 무시
+    
+    console.log(`선택한 답변: ${answerId}`);
+    const answerStr = String(answerId);
+    setSelectedAnswer(answerStr);
     setAnswerSubmitted(true);
-
-    // 정답 인덱스
+    
+    // 정답 여부 계산
     const correctAnswerIndex = typeof currentQuestion.correctAnswer === 'number'
       ? currentQuestion.correctAnswer
       : currentQuestion.choices.indexOf(currentQuestion.correctAnswer as string);
-
-    // 선택한 답변 인덱스
-    const selectedAnswerIndex = currentQuestion.choices.indexOf(answer);
-
-    // 정답 여부
+      
+    // 선택한 답변 인덱스 (0-based)
+    const selectedAnswerIndex = currentQuestion.choices.indexOf(answerStr);
+    
+    // 정답인지 확인
     const isCorrect = selectedAnswerIndex === correctAnswerIndex;
-
-    // 서버에 답변 전송
+    
+    // 사용자 응답 서버에 전송
     publish(`/app/room/${roomId}/answer`, {
-      questionId: currentQuestion.id,
+      roomId: roomId,
       playerId: currentUserId,
-      answer: selectedAnswerIndex,
+      questionId: currentQuestion.id,
+      questionNumber: currentQuestion.questionNumber,
+      answerId: selectedAnswerIndex,
       isCorrect: isCorrect,
       timestamp: Date.now()
     });
-
-    // 다른 플레이어들에게 선택 알림
+    
+    // 플레이어 점수 업데이트
+    updatePlayerScore(isCorrect);
+    
+    // 선택 정보 다른 플레이어에게 알림
     publish(`/app/game/${roomId}/player-choice`, {
-      playerId: currentUserId,
+      playerId: currentUserId.toString(),
       playerNickname: playerScores.find(p => p.id === currentUserId.toString())?.nickname || "플레이어",
       answerId: selectedAnswerIndex,
       avatarUrl: playerScores.find(p => p.id === currentUserId.toString())?.avatarUrl || "",
       timestamp: Date.now()
     });
-
-    // 로컬 상태 업데이트
-    updatePlayerScore(isCorrect);
-
-    // API로 답변 제출
-    submitAnswerToServer(currentQuestion.id, answer, isCorrect);
+    
+    // 추가: 단일 플레이어 모드에서 바로 결과 표시
+    if (playerScores.length === 1) {
+      setShowResults(true);
+    }
+    
+    console.log("답변 제출 완료, 서버에서 결과 처리 대기 중");
   };
   
   // 서버에 답변 제출하는 웹소켓 메시지 전송
@@ -824,38 +942,6 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     }
   };
   
-  // 플레이어 점수 업데이트
-  const updatePlayerScore = (isCorrect: boolean) => {
-    if (isCorrect) {
-      // 정답 처리
-      const scoreIncrease = calculateScore();
-      
-      setPlayerScores(prevScores => 
-        prevScores.map(player => 
-          player.id === currentUserId.toString() 
-            ? { ...player, score: player.score + scoreIncrease, lastAnswerCorrect: true }
-            : player
-        )
-      );
-      
-      // 정답 맞춘 메시지
-      publish(`/app/room/chat/${roomId}`, {
-        type: "SYSTEM",
-        content: `${playerScores.find(p => p.id === currentUserId.toString())?.nickname || '플레이어'}님이 정답을 맞추었습니다! +${scoreIncrease}점`,
-        timestamp: Date.now()
-      });
-    } else {
-      // 오답 처리
-      setPlayerScores(prevScores => 
-        prevScores.map(player => 
-          player.id === currentUserId.toString() 
-            ? { ...player, lastAnswerCorrect: false }
-            : player
-        )
-      );
-    }
-  };
-  
   // 남은 시간에 따른 점수 계산
   const calculateScore = () => {
     // 기본 점수
@@ -867,73 +953,25 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     return baseScore + timeBonus;
   };
   
-  // 다음 문제로 이동
-  const moveToNextQuestion = () => {
-    // 다음 문제 인덱스 계산
-    const nextQuestionIdx = currentQuestionIndex + 1;
-    
-    // 총 문제 수 결정 (room.problemCount를 우선적으로 사용)
-    const totalProblems = room?.problemCount || 5;  // 기본값 5로 설정
-    
-    console.log(`다음 문제 이동: 현재=${currentQuestionIndex}, 다음=${nextQuestionIdx}, 총=${totalProblems}, questions 배열 길이=${questions.length}`);
-    
-    // 모든 문제를 풀었다면 게임 종료
-    if (nextQuestionIdx >= totalProblems) {
-      console.log("모든 문제 완료! 게임 종료합니다.");
-      finishGame();  // 직접 finishGame 함수 호출
-      return;
-    }
-    
-    // 타이머 리셋을 위한 상태 업데이트 (순서 중요)
-    setSelectedAnswer(null);
-    setAnswerSubmitted(false);
-    setShowResults(false);
-    setTimeLeft(15); // 타이머 초기 시간 설정
-    
-    // 타이머 강제 리렌더링 위한 키 업데이트 (상태 업데이트 후에 실행)
-    setForceRenderKey(prev => prev + 1);
-    console.log("타이머 강제 리렌더링", forceRenderKey + 1);
-    
-    // 현재 문제 인덱스 업데이트 (마지막에 수행)
-    setCurrentQuestionIndex(nextQuestionIdx);
-    
-    // 서버에 다음 문제 요청
-    publish(`/app/room/${roomId}/question/next`, {
-      roomId: roomId,
-      currentQuestionIndex: currentQuestionIndex,
-      nextQuestionIndex: nextQuestionIdx,
-      timestamp: Date.now()
-    });
-    
-    // 다음 문제로 이동했다는 채팅 메시지
-    publish(`/app/room/chat/${roomId}`, {
-      type: "SYSTEM",
-      content: `문제 ${nextQuestionIdx + 1} 시작!`,
-      timestamp: Date.now()
-    });
-    
-    // 일정 시간이 지나도 다음 문제가 오지 않으면
-    setTimeout(() => {
-      if (currentQuestionIndex === nextQuestionIdx && 
-          (!currentQuestion || currentQuestion.question === "")) {
-        console.log("다음 문제를 받아오지 못했습니다.");
-        // 오류 상태를 표시하거나 다시 시도할 수 있는 로직 추가
-      }
-    }, 3000);
-  };
-  
-  // 게임 종료 처리
+  // 게임 종료 처리 - 개선
   const finishGame = async () => {
     try {
+      console.log("게임 종료 처리 시작");
+      
       // 게임 종료 상태로 변경
       setGameStatus("FINISHED");
       setShowFinalResults(true);
       
-      // 서버에 게임 종료 알림
+      // 서버에 게임 종료 알림 (모든 플레이어가 동시에 결과창 보기 위함)
       publish(`/app/room/${roomId}/game/end`, {
         roomId: roomId,
         timestamp: Date.now()
       });
+      
+      // 최종 점수 적용
+      if (typeof applyPendingScores === 'function') {
+        applyPendingScores();
+      }
       
       // 게임 종료 채팅 메시지
       publish(`/app/room/chat/${roomId}`, {
@@ -948,7 +986,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         score: player.score
       }));
       
-      // 서버에 결과 저장 (웹소켓으로 전송 - API 대신)
+      // 서버에 결과 저장 (웹소켓으로 전송)
       publish(`/app/room/${roomId}/finish`, {
         roomId: roomId,
         scores: finalScores,
@@ -961,6 +999,8 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         scores: playerScores,
         timestamp: Date.now()
       });
+      
+      console.log("게임 종료 처리 완료");
     } catch (error) {
       console.error("게임 종료 처리 중 오류 발생:", error);
     }
@@ -1026,7 +1066,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         
         // 대소문자 및 다양한 형식 지원
         const newStatus = data.gameStatus.toUpperCase();
-        let finalStatus: "WAITING" | "IN_PROGRESS" | "FINISHED" = gameStatus;
+        let finalStatus: GameStatus = gameStatus;
         
         if (newStatus === "IN_PROGRESS" || newStatus === "IN_GAME") {
           finalStatus = "IN_PROGRESS";
@@ -1037,6 +1077,9 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         } else if (newStatus === "WAITING" || newStatus === "READY") {
           finalStatus = "WAITING";
           console.log("게임 상태 WAITING으로 설정");
+        } else if (newStatus === "LOADING_NEXT_QUESTION") {
+          finalStatus = "LOADING_NEXT_QUESTION";
+          console.log("게임 상태 LOADING_NEXT_QUESTION으로 설정");
         }
         
         // 게임 상태가 실제로 변경되는 경우에만 업데이트
@@ -1206,6 +1249,60 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     // 새 문제로 변경되면 플레이어 선택 초기화
     setPlayerChoices({});
   }, [currentQuestionIndex]);
+  
+  // 모든 플레이어 응답 여부를 확인하는 useEffect 추가
+  useEffect(() => {
+    // 플레이어 인원수가 2명 이상이고, 현재 문제가 진행 중일 때만 체크
+    if (playerScores.length > 1 && gameStatus === 'IN_PROGRESS' && !showResults) {
+      // 응답한 플레이어 수
+      const respondedCount = respondedPlayers.size;
+      // 전체 플레이어 수
+      const totalPlayers = playerScores.length;
+      
+      // 모든 플레이어가 응답했는지 확인
+      if (respondedCount >= totalPlayers) {
+        console.log(`모든 플레이어(${totalPlayers}명)가 응답 완료`);
+        
+        // 결과를 보여주기 전 약간의 딜레이
+        setTimeout(() => {
+          // 결과 표시 상태로 변경
+          setShowResults(true);
+          
+          // 점수 일괄 적용
+          applyPendingScores();
+          
+          // 마지막 문제인지 확인
+          const totalProblems = room?.problemCount || questions.length || 5;
+          const isLastQuestion = (currentQuestionIndex === (totalProblems - 1)) || 
+                               window.sessionStorage.getItem('isLastQuestion') === 'true';
+          
+          console.log(`모든 플레이어 응답 완료: 마지막 문제 여부 = ${isLastQuestion}, 현재 인덱스 = ${currentQuestionIndex}, 총 문제 수 = ${totalProblems}`);
+          
+          // 다음 문제로 자동 이동 또는 게임 종료
+          setTimeout(() => {
+            if (isLastQuestion) {
+              console.log("마지막 문제였습니다. 게임을 종료합니다.");
+              finishGame();
+            } else {
+              console.log("다음 문제로 자동 이동합니다.");
+              moveToNextQuestion();
+            }
+          }, 5000); // 5초 후 자동 이동
+        }, 1000);
+      }
+    }
+  }, [respondedPlayers.size, playerScores.length, gameStatus, showResults]);
+  
+  // 초기화 시 세션 스토리지 클리어
+  useEffect(() => {
+    // 컴포넌트 마운트 시 isLastQuestion 세션 스토리지 제거
+    window.sessionStorage.removeItem('isLastQuestion');
+    
+    return () => {
+      // 컴포넌트 언마운트 시에도 제거
+      window.sessionStorage.removeItem('isLastQuestion');
+    };
+  }, []);
   
   // 게임 대기 화면
   if (gameStatus === "WAITING") {
