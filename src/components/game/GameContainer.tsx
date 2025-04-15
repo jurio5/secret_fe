@@ -76,9 +76,9 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   // 현재 문제 정보
   const currentQuestion = questions[currentQuestionIndex];
   
-  // 더미 문제 사용 함수 - useCallback으로 감싸기
-  const useDummyQuestions = useCallback(() => {
-    console.log("더미 문제 데이터 사용");
+  // 더미 문제 생성 함수 (훅 아님)
+  const createDummyQuestions = () => {
+    console.log("더미 문제 데이터 생성");
     const dummyQuestions: QuizQuestionType[] = [
       {
         id: "dummy1",
@@ -136,6 +136,13 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         timeLimit: 20
       }
     ];
+    return dummyQuestions;
+  };
+
+  // 더미 문제 사용 함수 (컴포넌트 내 최상위 레벨)
+  const useDummyQuestions = useCallback(() => {
+    console.log("더미 문제 데이터 사용");
+    const dummyQuestions = createDummyQuestions();
     setQuestions(dummyQuestions);
     setTimeLeft(20); // 첫 문제 타이머 시작
     setCurrentQuestionIndex(0);
@@ -156,10 +163,13 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       setCurrentQuestionIndex(0);
     } catch (error) {
       console.error("문제 데이터 로드 중 오류:", error);
-      // 오류 발생 시 더미 문제 사용
-      useDummyQuestions();
+      // 오류 발생 시 더미 문제 설정 (직접 호출하지 않고 상태 설정)
+      const dummyQuestions = createDummyQuestions();
+      setQuestions(dummyQuestions);
+      setTimeLeft(20);
+      setCurrentQuestionIndex(0);
     }
-  }, [useDummyQuestions]);
+  }, []);
   
   // 게임 종료 처리 함수
   const handleGameEnd = () => {
@@ -258,9 +268,21 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
             if (quizId) {
               console.log("저장된 퀴즈 ID로 문제 데이터 로드 시작:", quizId);
               fetchQuestions(quizId);
-            } else if (data.quizId) {
-              console.log("수신된 퀴즈 ID로 문제 데이터 로드 시작:", data.quizId);
-              fetchQuestions(data.quizId);
+            } else {
+              // 세션 스토리지에서 저장된 퀴즈 ID 확인
+              const storedQuizId = window.sessionStorage.getItem('currentQuizId');
+              if (storedQuizId) {
+                console.log("세션 스토리지에서 퀴즈 ID 복원:", storedQuizId);
+                setQuizId(storedQuizId);
+                fetchQuestions(storedQuizId);
+              } else {
+                console.log("퀴즈 ID가 없어 더미 문제를 사용합니다.");
+                // 더미 문제 사용 (직접 생성하여 상태 설정)
+                const dummyQuestions = createDummyQuestions();
+                setQuestions(dummyQuestions);
+                setTimeLeft(20);
+                setCurrentQuestionIndex(0);
+              }
             }
             
             // 강제 리렌더링
@@ -417,22 +439,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
             window.sessionStorage.setItem('currentQuizId', dummyQuizId);
             
             // 더미 문제 데이터 생성
-            const dummyQuestions: QuizQuestionType[] = Array(5).fill(null).map((_, index) => ({
-              id: `dummy-q${index + 1}`,
-              questionNumber: index + 1,
-              question: `더미 문제 ${index + 1}: 아래 중 옳은 것은?`,
-              choices: [
-                "첫 번째 선택지",
-                "두 번째 선택지",
-                "세 번째 선택지",
-                "네 번째 선택지"
-              ],
-              correctAnswer: Math.floor(Math.random() * 4),
-              category: "DUMMY",
-              subCategory: "DUMMY",
-              explanation: "",
-              timeLimit: 20
-            }));
+            const dummyQuestions = createDummyQuestions();
             
             // 더미 문제 데이터 설정
             setQuestions(dummyQuestions);
@@ -764,7 +771,11 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
                 fetchQuestions(storedQuizId);
               } else {
                 console.log("퀴즈 ID가 없어 더미 문제를 사용합니다.");
-                useDummyQuestions(); // 퀴즈 ID가 없는 경우 더미 문제 사용
+                // 더미 문제 사용 (직접 생성하여 상태 설정)
+                const dummyQuestions = createDummyQuestions();
+                setQuestions(dummyQuestions);
+                setTimeLeft(20);
+                setCurrentQuestionIndex(0);
               }
             }
           }
@@ -790,7 +801,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       unsubscribe(`/topic/room/${roomId}/status`);
       console.log("방 상태 구독 해제");
     };
-  }, [roomId, gameStatus, quizId, fetchQuestions, useDummyQuestions, subscribe, unsubscribe]);
+  }, [roomId, gameStatus, quizId, fetchQuestions]);
   
   // 게임 대기 화면
   if (gameStatus === "WAITING") {
