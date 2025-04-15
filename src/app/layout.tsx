@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import localFont from "next/font/local";
 import { ToastProvider } from "@/contexts/ToastContext";
+import { Toaster } from 'react-hot-toast';
 
 const pretendard = localFont({
   src: "./../../node_modules/pretendard/dist/web/variable/woff2/PretendardVariable.woff2",
@@ -26,6 +27,32 @@ export default function RootLayout({
         <ToastProvider>
           {children}
         </ToastProvider>
+        <Toaster
+          position="top-center"
+          reverseOrder={false}
+          gutter={8}
+          toastOptions={{
+            duration: 2000,
+            style: {
+              background: '#333',
+              color: '#fff',
+              borderRadius: '10px',
+              padding: '16px'
+            },
+            success: {
+              iconTheme: {
+                primary: '#4caf50',
+                secondary: '#fff',
+              },
+            },
+            error: {
+              iconTheme: {
+                primary: '#e53935',
+                secondary: '#fff',
+              },
+            },
+          }}
+        />
       </body>
     </html>
   );
