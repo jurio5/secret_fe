@@ -1367,24 +1367,49 @@ function LobbyContent({
       
       console.log("방 업데이트 알림 수신:", message);
       let roomId = null;
+      let hasStatusUpdate = false;
+      let newStatus = null;
       
       // 메시지 형식에 따른 룸 ID 추출
       if (typeof message === 'string' && message.startsWith && message.startsWith("ROOM_UPDATED:")) {
         roomId = message.split(":")[1];
       } else if (message.roomId) {
         roomId = message.roomId;
+        if (message.status) {
+          hasStatusUpdate = true;
+          newStatus = message.status;
+        }
       } else if (message.id) {
         roomId = message.id;
+        if (message.status) {
+          hasStatusUpdate = true;
+          newStatus = message.status;
+        }
       }
       
       if (roomId) {
         // 개별 방 정보 업데이트
         try {
+          // 상태 변경이 있으면 즉시 반영 (게임 시작)
+          if (hasStatusUpdate) {
+            setRooms(prevRooms => {
+              return prevRooms.map(room => {
+                if (room.id === parseInt(roomId)) {
+                  console.log(`방 ${roomId} 상태 즉시 변경: ${room.status} -> ${newStatus}`);
+                  return { ...room, status: newStatus };
+                }
+                return room;
+              });
+            });
+          }
+          
+          // 백엔드에서 최신 정보 가져오기
           fetch(`/api/v1/rooms/${roomId}`)
             .then(res => res.json())
             .then(data => {
               if (data && data.data) {
                 const updatedRoom = data.data;
+                
                 setRooms(prevRooms => {
                   // 기존 목록에 있는지 확인
                   const roomExists = prevRooms.some(room => room.id === parseInt(roomId));
@@ -1404,8 +1429,8 @@ function LobbyContent({
                 });
               }
             })
-            .catch(err => {
-              console.error("방 정보 업데이트 실패:", err);
+            .catch(error => {
+              console.error("방 정보 업데이트 실패:", error);
               // 오류 발생 시 전체 목록 새로고침
               loadRooms();
             });

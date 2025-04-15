@@ -389,6 +389,17 @@ export default function RoomPage() {
           };
         });
         
+        // 로비에 방 상태 변경 알림 (대기중 -> 게임중)
+        publish('/app/lobby', {
+          type: "ROOM_UPDATED",
+          roomId: parseInt(roomId),
+          status: "IN_GAME",
+          timestamp: Date.now()
+        });
+        
+        // 직접적으로 로비에 방 상태가 변경되었음을 알림
+        publish(`/app/lobby`, `ROOM_UPDATED:${roomId}`);
+        
         // 지연 후 상태 브로드캐스트 - 게임 상태 동기화
         setTimeout(() => {
           // 방 상태 메시지 발행 (전체 동기화)
@@ -1170,6 +1181,17 @@ export default function RoomPage() {
                 status: 'IN_GAME' 
               };
             });
+            
+            // 로비에 방 상태 변경 알림 (대기중 -> 게임중)
+            publish('/app/lobby', {
+              type: "ROOM_UPDATED",
+              roomId: parseInt(roomId),
+              status: "IN_GAME",
+              timestamp: Date.now()
+            });
+            
+            // 직접적으로 로비에 방 상태가 변경되었음을 알림
+            publish(`/app/lobby`, `ROOM_UPDATED:${roomId}`);
             
             // 지연 후 상태 브로드캐스트 - 게임 상태 동기화
             setTimeout(() => {
