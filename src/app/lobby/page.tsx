@@ -4,7 +4,7 @@ import { useEffect, Suspense, useState, useRef } from "react";
 import AppLayout from "@/components/common/AppLayout";
 import client from "@/lib/backend/client";
 import { components } from "@/lib/backend/apiV1/schema";
-import { subscribe, unsubscribe, publish, reconnectWebSocket } from "@/lib/backend/stompClient";
+import { subscribe, unsubscribe, publish, reconnectWebSocket, stompClient } from "@/lib/backend/stompClient";
 import Toast, { ToastProps } from "@/components/common/Toast";
 import { FaTrophy, FaUserFriends, FaUser, FaComments } from "react-icons/fa";
 import { useRouter } from "next/navigation";
@@ -868,7 +868,7 @@ function LobbyContent({
   };
 
   // 채팅 메시지 전송 함수
-  const handleSendChatMessage = () => {
+  const handleSendChatMessage = async () => {
     if (!newChatMessage.trim() || !currentUser) return;
     
     // 발송할 메시지 내용
@@ -877,10 +877,54 @@ function LobbyContent({
     // 메시지 입력창 초기화
     setNewChatMessage("");
     
-    // 서버로 채팅 메시지 발행
-    publish("/app/lobby/chat", messageContent);
-    
-    console.log("채팅 메시지 전송:", messageContent);
+    try {
+      // 안전한 구독 및 발행 함수 사용
+      const { safeSubscribe, safePublish } = await import('@/lib/backend/stompClient');
+      
+      // 로비 채팅 채널 구독 확인
+      console.log("[CHAT] 메시지 전송 전 로비 채팅 구독 확인");
+      await safeSubscribe("/topic/lobby/chat", (chatMsg) => {
+        console.log("[CHAT] 로비 채팅 메시지 수신:", chatMsg);
+        if (chatMsg.type === "CHAT" || (!chatMsg.type && chatMsg.content)) {
+          // 중복 메시지 검사
+          const isDuplicate = chatMessages.some(existingMsg => 
+            existingMsg.timestamp === chatMsg.timestamp && 
+            existingMsg.senderId === chatMsg.senderId && 
+            existingMsg.content === chatMsg.content
+          );
+          
+          if (isDuplicate) {
+            console.log("중복 메시지 무시:", chatMsg);
+            return;
+          }
+          
+          // 메시지 처리
+          receiveMessage(chatMsg);
+        }
+      });
+      
+      // 안전한 발행 함수를 사용하여 메시지 전송
+      console.log(`[CHAT] 채팅 메시지 전송: "${messageContent}"`);
+      const published = await safePublish("/app/lobby/chat", messageContent);
+      
+      if (!published) {
+        throw new Error("메시지 발행 실패");
+      }
+    } catch (error) {
+      console.error("[CHAT] 메시지 전송 중 오류 발생:", error);
+      // 오류 메시지를 채팅창에 추가
+      setChatMessages(prev => [
+        ...prev,
+        {
+          type: "SYSTEM",
+          content: "메시지 전송에 실패했습니다. 새로고침 후 다시 시도해주세요.",
+          senderId: "system",
+          senderName: "System",
+          timestamp: Date.now(),
+          id: `system-error-${Date.now()}`
+        }
+      ]);
+    }
   };
   
   // 채팅 입력창 키 이벤트 핸들러
@@ -1039,12 +1083,14 @@ function LobbyContent({
       });
     };
     
+    console.log("useEffect에서 로비 채팅 추가 구독 시도...");
+    // 중복 구독이 되더라도 메시지 처리에는 영향이 없으므로 안전
     subscribe("/topic/lobby/chat", handleChatMessage);
     
     return () => {
       unsubscribe("/topic/lobby/chat");
     };
-  }, [isConnected]); // 연결 상태가 변경될 때만 구독 갱신
+  }, [isConnected, chatMessages]); // 연결 상태가 변경될 때와 채팅 메시지 변경될 때 구독 갱신
   
   // 기존 사용자 프로필 아바타 URL 업데이트 useEffect는 유지
   useEffect(() => {
@@ -1145,17 +1191,65 @@ function LobbyContent({
           } else {
             // 기본 아바타 설정
             avatarUrl = DEFAULT_AVATAR;
+            
+            // 백그라운드에서 사용자 프로필 정보 가져오기
+            // 단, 많은 요청을 피하기 위해 이미 진행 중인 요청이 없을 때만 실행
+            const fetchUserAvatar = async () => {
+              try {
+                const response = await client.GET(`/api/v1/members/{memberId}`, {
+                  params: { path: { memberId: senderId } }
+                }) as ApiResponse<UserProfile>;
+                
+                if (response.data?.data && response.data.data.avatarUrl) {
+                  // 캐시에 저장할 프로필 데이터와 아바타 URL 추출
+                  const profileData = response.data.data;
+                  const avatarUrl = profileData.avatarUrl;
+                  
+                  // 캐시 업데이트
+                  userProfileCache[senderId] = {
+                    ...profileData,
+                    lastUpdated: Date.now()
+                  };
+                  
+                  // 메시지 업데이트 - 아바타만 변경
+                  setChatMessages(prev => {
+                    const updatedMessages = prev.map(msg => 
+                      msg.senderId === message.senderId && 
+                      msg.timestamp === message.timestamp
+                        ? { ...msg, avatarUrl: avatarUrl }
+                        : msg
+                    );
+                    
+                    // 글로벌 캐시 업데이트
+                    lobbyMessageCache = [...updatedMessages];
+                    
+                    return updatedMessages;
+                  });
+                }
+              } catch (error) {
+                console.error(`사용자 ${senderId}의 프로필 정보를 가져오는데 실패했습니다:`, error);
+              }
+            };
+            
+            // 사용자 정보가 캐시에 없고, 로그인된 사용자인 경우에만 백그라운드 요청 수행
+            if (currentUser) {
+              fetchUserAvatar();
+            }
           }
         }
       }
       
-      // 메시지에 아바타 URL 추가
+      // 메시지에 고유 ID 추가
+      const messageWithId = {
+        ...message,
+        id: `${message.senderId}-${message.timestamp}-${Math.random().toString(36).substr(2, 5)}`,
+        avatarUrl: avatarUrl || DEFAULT_AVATAR
+      };
+      
+      // 메시지 추가
       setChatMessages((prevMessages) => {
         // 새 메시지가 추가된 배열
-        const newMessages = [...prevMessages, {
-          ...message,
-          avatarUrl: avatarUrl || DEFAULT_AVATAR
-        }];
+        const newMessages = [...prevMessages, messageWithId];
         
         // 메시지 최대 개수 제한 (너무 많은 메시지가 쌓이지 않도록)
         const maxMessages = 100;
@@ -1168,8 +1262,6 @@ function LobbyContent({
         
         return trimmedMessages;
       });
-      
-      return;
     }
     
     // 방 생성 메시지인 경우
@@ -1304,42 +1396,64 @@ function LobbyContent({
     }
   };
 
-  // WebSocket 초기화에 로비 상태 메시지 구독 추가
-  const initializeWebSocket = async () => {
-    try {
-      // 룸 업데이트 구독
-      subscribe("/topic/lobby", receiveMessage);
+// WebSocket 초기화에 로비 상태 메시지 구독 추가
+const initializeWebSocket = async () => {
+  try {
+    console.log("[INIT] WebSocket 초기화 시작");
+    
+    // STOMP 클라이언트 연결 상태 확인 및 대기
+    const { waitForConnection, reconnectWebSocket, safeSubscribe, safePublish } = await import('@/lib/backend/stompClient');
+    
+    // 연결 상태 확인
+    let connected = await waitForConnection(2000);
+    if (!connected) {
+      console.log("[INIT] STOMP 연결 대기 시간 초과, 재연결 시도");
+      await reconnectWebSocket();
+      connected = await waitForConnection(3000);
       
-      // 로비 채팅 메시지는 별도의 handleChatMessage 함수로 처리하므로 여기서는 구독하지 않음
-      // subscribe("/topic/lobby/chat", receiveMessage); - 제거: 중복 구독 방지
-      
-      // 로비 상태 업데이트 구독 - 상태 메시지와 채팅 메시지 분리
-      subscribe("/topic/lobby/status", receiveMessage);
-      
-      // 로비 사용자 목록 구독
-      subscribe("/topic/lobby/users", receiveMessage);
-      
-      setIsConnected(true);
-      console.log("WebSocket 연결 성공");
-      
-      // 연결 성공 시 사용자 정보 로드
-      await fetchCurrentUser();
-      
-      // 방 목록 로드
-      await loadRooms();
-    } catch (error) {
-      console.error("WebSocket 초기화 중 오류 발생:", error);
+      if (!connected) {
+        console.log("[INIT] 재연결 후에도 STOMP 연결 실패");
+        // 실패해도 계속 진행 - 나중에 자동 재시도됨
+      }
     }
     
+    console.log("[INIT] STOMP 연결 상태:", connected ? "연결됨" : "연결 안됨");
+    
+    // 모든 구독을 한 번에 시도
+    console.log("[INIT] 안전 구독 시작 - 로비 채팅");
+    await safeSubscribe("/topic/lobby/chat", (chatMessage) => {
+      console.log("[CHAT] 로비 채팅 메시지 수신:", chatMessage);
+      receiveMessage(chatMessage);
+    });
+    
+    console.log("[INIT] 안전 구독 시작 - 기타 토픽");
+    await safeSubscribe("/topic/lobby", receiveMessage);
+    await safeSubscribe("/topic/lobby/status", receiveMessage);
+    await safeSubscribe("/topic/lobby/users", receiveMessage);
+    
+    // 웹소켓 연결 상태 업데이트
+    setIsConnected(true);
+    console.log("[INIT] WebSocket 연결 및 구독 완료");
+    
+    // 연결 성공 시 사용자 정보 로드
+    await fetchCurrentUser();
+    
+    // 방 목록 로드
+    await loadRooms();
+    
     // 연결 성공 시 본인 상태를 로비에 업데이트
-    publish('/app/lobby/status', {
+    console.log("[INIT] 로비 상태 업데이트 전송");
+    await safePublish('/app/lobby/status', {
       type: "STATUS_UPDATE",
       status: "로비",
       location: "IN_LOBBY",
       roomId: null,
       timestamp: Date.now()
     });
-  };
+  } catch (error) {
+    console.error("[ERROR] WebSocket 초기화 중 오류 발생:", error);
+  }
+};
 
   // 페이지 로드 시 intentional_navigation 플래그 초기화
   useEffect(() => {
@@ -1448,6 +1562,156 @@ function LobbyContent({
       
       return () => clearInterval(interval);
     }
+  }, [currentUser]);
+
+  // 로비 채팅 구독을 위한 별도의 useEffect 추가
+  useEffect(() => {
+    if (!isConnected) return;
+    
+    console.log("로비 채팅 구독 시도: /topic/lobby/chat");
+    
+    // 명시적 구독
+    subscribe("/topic/lobby/chat", (msg) => {
+      console.log("로비 채팅 메시지 수신:", msg);
+      
+      // 메시지 타입과 내용이 있는 경우에만 처리
+      if (msg && (msg.type === "CHAT" || (!msg.type && msg.content))) {
+        // 중복 메시지 검사
+        const isDuplicate = chatMessages.some(existingMsg => 
+          existingMsg.timestamp === msg.timestamp && 
+          existingMsg.senderId === msg.senderId && 
+          existingMsg.content === msg.content
+        );
+        
+        if (isDuplicate) {
+          console.log("중복 메시지 무시:", msg);
+          return;
+        }
+        
+        // 메시지 처리 로직
+        let avatarUrl = undefined;
+        
+        if (msg.senderId && msg.senderId !== "system") {
+          const senderId = parseInt(msg.senderId);
+          avatarUrl = userProfileCache[senderId]?.avatarUrl || DEFAULT_AVATAR;
+        }
+        
+        // 메시지에 고유 ID 추가
+        const messageWithId = {
+          ...msg,
+          id: `${msg.senderId}-${msg.timestamp}-${Math.random().toString(36).substr(2, 5)}`,
+          avatarUrl: avatarUrl || DEFAULT_AVATAR
+        };
+        
+        // 메시지 추가
+        setChatMessages((prevMessages) => {
+          const newMessages = [...prevMessages, messageWithId];
+          
+          // 메시지 최대 개수 제한
+          const maxMessages = 100;
+          const trimmedMessages = newMessages.length > maxMessages 
+            ? newMessages.slice(newMessages.length - maxMessages) 
+            : newMessages;
+          
+          // 글로벌 캐시 업데이트
+          lobbyMessageCache = [...trimmedMessages];
+          
+          return trimmedMessages;
+        });
+      }
+    });
+    
+    return () => {
+      unsubscribe("/topic/lobby/chat");
+    };
+  }, [isConnected]); // 연결 상태 변경 시에만 실행
+
+  // 웹소켓 연결 상태를 주기적으로 확인하는 useEffect 추가
+  useEffect(() => {
+    if (!currentUser) return; // 로그인된 사용자만 확인
+    
+    // 10초마다 웹소켓 연결 상태 확인
+    const checkConnectionInterval = setInterval(async () => {
+      try {
+        const { stompClient, waitForConnection, safeSubscribe, reconnectWebSocket } = await import('@/lib/backend/stompClient');
+        
+        // 연결 상태 확인
+        if (!stompClient.connected) {
+          console.log("[CHECK] STOMP 연결이 끊어짐 감지");
+          
+          // 연결이 끊어진 상태임을 사용자에게 알림
+          setChatMessages(prev => [
+            ...prev,
+            {
+              type: "SYSTEM",
+              content: "채팅 연결이 끊어졌습니다. 재연결 중...",
+              senderId: "system",
+              senderName: "System",
+              timestamp: Date.now(),
+              id: `system-reconnect-${Date.now()}`
+            }
+          ]);
+          
+          // 재연결 시도
+          console.log("[CHECK] 연결 재시도 중...");
+          await reconnectWebSocket();
+          
+          // 연결 대기
+          const connected = await waitForConnection(3000);
+          
+          if (connected) {
+            console.log("[CHECK] 연결 복구 성공");
+            
+            // 모든 주요 채널 재구독
+            await safeSubscribe("/topic/lobby/chat", (chatMsg) => {
+              console.log("[CHAT] 로비 채팅 메시지 수신:", chatMsg);
+              receiveMessage(chatMsg);
+            });
+            
+            await safeSubscribe("/topic/lobby", receiveMessage);
+            await safeSubscribe("/topic/lobby/status", receiveMessage);
+            await safeSubscribe("/topic/lobby/users", receiveMessage);
+            
+            // 연결 성공 메시지
+            setChatMessages(prev => [
+              ...prev,
+              {
+                type: "SYSTEM",
+                content: "채팅 연결이 복구되었습니다.",
+                senderId: "system",
+                senderName: "System",
+                timestamp: Date.now(),
+                id: `system-reconnected-${Date.now()}`
+              }
+            ]);
+            
+            // 연결 상태 업데이트
+            setIsConnected(true);
+          } else {
+            console.log("[CHECK] 연결 복구 실패");
+            
+            // 연결 실패 메시지
+            setChatMessages(prev => [
+              ...prev,
+              {
+                type: "SYSTEM",
+                content: "채팅 연결 복구에 실패했습니다. 페이지를 새로고침 해주세요.",
+                senderId: "system",
+                senderName: "System",
+                timestamp: Date.now(),
+                id: `system-reconnect-fail-${Date.now()}`
+              }
+            ]);
+          }
+        }
+      } catch (error) {
+        console.error("[CHECK] 연결 상태 확인 중 오류:", error);
+      }
+    }, 10000); // 10초마다 확인
+    
+    return () => {
+      clearInterval(checkConnectionInterval);
+    };
   }, [currentUser]);
 
   return (
