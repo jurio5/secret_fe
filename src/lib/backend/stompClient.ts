@@ -27,7 +27,6 @@ const publishQueue: {
 // Java 객체 문자열 파싱 함수
 const parseJavaObjectString = (text: string): any => {
   try {
-
     // 객체 이름과 내용 분리
     const match = text.match(/(\w+)\[(.*)\]/);
     if (!match) return null;
@@ -101,30 +100,36 @@ let stompClient = new Client({
   webSocketFactory: () => socket,
   connectHeaders: {},
   debug: (str) => {
-    //console.log("[STOMP]", str);
+    console.log("[STOMP]", str);
   },
   reconnectDelay: 5000,
   heartbeatIncoming: 25000,
   heartbeatOutgoing: 25000,
   onConnect: () => {
-    //console.log("✅ WebSocket 연결 성공");
+    console.log("✅ WebSocket 연결 성공, 대기 중인 구독 및 발행 처리 시작");
     stompClientConnected = true;
 
+    console.log(`대기 중인 구독 수: ${subscriptionQueue.length}, 발행 수: ${publishQueue.length}`);
+    
     // 연결 성공 시 대기 중인 구독 처리
     while (subscriptionQueue.length > 0) {
       const { destination, callback } = subscriptionQueue.shift()!;
+      console.log(`대기 큐에서 구독 처리: ${destination}`);
       performSubscribe(destination, callback);
     }
 
     // 연결 성공 시 대기 중인 발행 처리
     while (publishQueue.length > 0) {
       const { destination, body } = publishQueue.shift()!;
+      console.log(`대기 큐에서 발행 처리: ${destination}`);
       performPublish(destination, body);
     }
+    
+    console.log("모든 대기 중인 작업 처리 완료");
   },
   onStompError: (frame) => {
-    //console.error("❌ STOMP 오류:", frame.headers["message"]);
-    //console.error("상세 내용:", frame.body);
+    console.error("❌ STOMP 오류:", frame.headers["message"]);
+    console.error("상세 내용:", frame.body);
   },
 });
 
@@ -133,114 +138,139 @@ const performSubscribe = (
   destination: string,
   callback: (message: any) => void
 ) => {
-  //console.log(`구독 시작: ${destination}`);
+  console.log(`[SUBSCRIBE] 구독 실행: ${destination}`);
   
-  const subscription = stompClient.subscribe(destination, (message) => {
-    //console.log(`메시지 수신 (${destination}):`, message.body);
-    
-    // 채팅 메시지 전용 처리 추가
-    if (destination.includes('/chat/')) {
-      //console.log(`채팅 메시지 수신 감지 (${destination})`);
-    }
-    
-    try {
-      // JSON 파싱 시도
-      const parsedMessage = JSON.parse(message.body);
-      //console.log("JSON 파싱 성공:", parsedMessage);
-      callback(parsedMessage);
-    } catch (error) {
-      //console.log("JSON 파싱 실패, 다른 방식으로 시도:", error);
+  try {
+    const subscription = stompClient.subscribe(destination, (message) => {
+      console.log(`[MESSAGE] ${destination} 메시지 수신:`, 
+        typeof message.body === 'string' 
+          ? message.body.substring(0, 50) + (message.body.length > 50 ? '...' : '') 
+          : '[비문자열]');
       
-      // JSON 파싱 실패 시 Java 객체 문자열 파싱 시도
-      if (message.body.includes("WebSocketChatMessageResponse[")) {
-        const javaObject = parseJavaObjectString(message.body);
-        if (javaObject) {
-          //console.debug("Java 객체 문자열 파싱 성공:", javaObject);
-          callback(javaObject);
-          return;
-        }
+      // 채팅 메시지 특별 처리
+      if (destination.includes('/chat/')) {
+        console.log(`[CHAT] 채팅 메시지 감지: ${destination}`);
       }
       
-      // ROOM_CREATED 특수 메시지 처리
-      if (destination === "/topic/lobby" && message.body.startsWith("ROOM_CREATED:")) {
-        const roomId = message.body.split(":")[1];
-        //console.debug("방 생성 메시지 감지:", roomId);
-        callback({
-          type: "ROOM_CREATED",
-          roomId: parseInt(roomId),
-          timestamp: Date.now()
-        });
-        return;
-      }
-      
-      // 채팅 메시지 특수 처리
-      if (destination.includes('/chat')) {
-        //console.log(`채팅 메시지 처리 시도 (${destination}):`, message.body);
+      try {
+        // JSON 파싱 시도
+        const parsedMessage = JSON.parse(message.body);
+        console.log(`[MESSAGE] JSON 파싱 성공:`, 
+          parsedMessage ? 
+            `타입=${parsedMessage.type || 'no-type'}, ID=${parsedMessage.id || 'no-id'}` : 
+            'empty');
+        callback(parsedMessage);
+      } catch (error) {
+        console.log(`[MESSAGE] JSON 파싱 실패, 대체 처리 시도:`, error);
         
-        try {
-          // 문자열이 아닌 경우 처리
-          if (typeof message.body !== 'string') {
-            //console.log("채팅 메시지가 문자열이 아님. 직접 전달:", message.body);
-            callback(message.body);
+        // JSON 파싱 실패 시 Java 객체 문자열 파싱 시도
+        if (message.body.includes("WebSocketChatMessageResponse[")) {
+          const javaObject = parseJavaObjectString(message.body);
+          if (javaObject) {
+            //console.debug("Java 객체 문자열 파싱 성공:", javaObject);
+            callback(javaObject);
             return;
           }
-          
-          // 문자열에서 중괄호 추출 시도
-          const bracketMatch = message.body.match(/{.*}/);
-          if (bracketMatch) {
-            try {
-              const jsonContent = JSON.parse(bracketMatch[0]);
-              //console.log("중괄호에서 JSON 추출 성공:", jsonContent);
-              callback(jsonContent);
-              return;
-            } catch (e) {
-              //console.log("중괄호 내용 파싱 실패:", e);
-            }
-          }
-          
-          // 채팅 메시지용 기본 객체 생성
-          //console.log("기본 채팅 메시지 객체 생성");
-          const roomId = destination.includes('/chat/') 
-            ? destination.split('/chat/')[1] 
-            : destination.split('/').pop() || "unknown";
-          
+        }
+        
+        // ROOM_CREATED 특수 메시지 처리
+        if (destination === "/topic/lobby" && message.body.startsWith("ROOM_CREATED:")) {
+          const roomId = message.body.split(":")[1];
+          //console.debug("방 생성 메시지 감지:", roomId);
           callback({
-            type: "CHAT",
-            content: message.body,
-            senderId: "system",
-            senderName: "System",
-            timestamp: Date.now(),
-            roomId: roomId
-          });
-        } catch (chatError) {
-          //console.error("채팅 메시지 처리 중 오류:", chatError);
-          callback({
-            type: "SYSTEM",
-            content: "메시지 처리 중 오류가 발생했습니다.",
-            senderId: "system",
-            senderName: "System",
+            type: "ROOM_CREATED",
+            roomId: parseInt(roomId),
             timestamp: Date.now()
           });
+          return;
         }
-      } else {
-        // 기타 메시지는 원본 반환
-        //console.log("기타 메시지 원본 반환:", message.body);
-        callback(message.body);
+        
+        // 채팅 메시지 특수 처리
+        if (destination.includes('/chat')) {
+          //console.log(`채팅 메시지 처리 시도 (${destination}):`, message.body);
+          
+          try {
+            // 문자열이 아닌 경우 처리
+            if (typeof message.body !== 'string') {
+              //console.log("채팅 메시지가 문자열이 아님. 직접 전달:", message.body);
+              callback(message.body);
+              return;
+            }
+            
+            // 문자열에서 중괄호 추출 시도
+            const bracketMatch = message.body.match(/{.*}/);
+            if (bracketMatch) {
+              try {
+                const jsonContent = JSON.parse(bracketMatch[0]);
+                //console.log("중괄호에서 JSON 추출 성공:", jsonContent);
+                callback(jsonContent);
+                return;
+              } catch (e) {
+                //console.log("중괄호 내용 파싱 실패:", e);
+              }
+            }
+            
+            // 채팅 메시지용 기본 객체 생성
+            //console.log("기본 채팅 메시지 객체 생성");
+            const roomId = destination.includes('/chat/') 
+              ? destination.split('/chat/')[1] 
+              : destination.split('/').pop() || "unknown";
+            
+            callback({
+              type: "CHAT",
+              content: message.body,
+              senderId: "system",
+              senderName: "System",
+              timestamp: Date.now(),
+              roomId: roomId
+            });
+          } catch (chatError) {
+            //console.error("채팅 메시지 처리 중 오류:", chatError);
+            callback({
+              type: "SYSTEM",
+              content: "메시지 처리 중 오류가 발생했습니다.",
+              senderId: "system",
+              senderName: "System",
+              timestamp: Date.now()
+            });
+          }
+        } else {
+          // 기타 메시지는 원본 반환
+          //console.log("기타 메시지 원본 반환:", message.body);
+          callback(message.body);
+        }
       }
-    }
-  });
-  
-  //console.log(`구독 완료: ${destination}`);
-  activeSubscriptions[destination] = subscription;
+    });
+    
+    console.log(`[SUBSCRIBE] 구독 완료: ${destination}`);
+    activeSubscriptions[destination] = subscription;
+  } catch (subscribeError) {
+    console.error(`[SUBSCRIBE] 구독 실패: ${destination}`, subscribeError);
+  }
 };
 
 // 구독 함수
 const subscribe = (destination: string, callback: (message: any) => void) => {
+  console.log(`[SUBSCRIBE] 구독 요청: ${destination}`);
+  
+  // 이미 구독되어 있는 경우 확인
+  if (activeSubscriptions[destination]) {
+    console.log(`[SUBSCRIBE] ❗ 이미 구독 중: ${destination}`);
+    
+    // 이미 존재하는 구독은 유지하고 콜백만 교체
+    const oldSubscription = activeSubscriptions[destination];
+    oldSubscription.unsubscribe();
+    delete activeSubscriptions[destination];
+    console.log(`[SUBSCRIBE] 기존 구독 해제 후 재구독: ${destination}`);
+  }
+
   if (!stompClientConnected) {
     // 연결되지 않은 경우 큐에 추가
+    console.log(`[SUBSCRIBE] 아직 연결되지 않음, 구독 큐에 추가: ${destination}`);
     subscriptionQueue.push({ destination, callback });
   } else {
     // 이미 연결된 경우 바로 구독
+    console.log(`[SUBSCRIBE] 즉시 구독 처리: ${destination}`);
     performSubscribe(destination, callback);
   }
 };
@@ -248,13 +278,21 @@ const subscribe = (destination: string, callback: (message: any) => void) => {
 // 구독 해제 함수
 const unsubscribe = (destination: string) => {
   if (activeSubscriptions[destination]) {
-    activeSubscriptions[destination].unsubscribe();
-    delete activeSubscriptions[destination];
+    console.log(`[UNSUBSCRIBE] 구독 해제: ${destination}`);
+    try {
+      activeSubscriptions[destination].unsubscribe();
+      delete activeSubscriptions[destination];
+    } catch (error) {
+      console.error(`[UNSUBSCRIBE] 구독 해제 중 오류: ${destination}`, error);
+    }
+  } else {
+    console.log(`[UNSUBSCRIBE] 구독 해제 요청했으나 활성 구독 없음: ${destination}`);
   }
 };
 
 // 실제 발행을 수행하는 내부 함수
 const performPublish = (destination: string, body: any) => {
+  console.log(`[PUBLISH] 메시지 발행: ${destination}`, typeof body === 'string' ? body : '(객체)');
   stompClient.publish({
     destination,
     body: JSON.stringify(body),
@@ -265,6 +303,7 @@ const performPublish = (destination: string, body: any) => {
 const publish = (destination: string, body: any) => {
   if (!stompClientConnected) {
     // 연결되지 않은 경우 큐에 추가
+    console.log(`[PUBLISH] 연결 안됨, 발행 큐에 추가: ${destination}`);
     publishQueue.push({ destination, body });
   } else {
     // 이미 연결된 경우 바로 발행
@@ -275,7 +314,7 @@ const publish = (destination: string, body: any) => {
 // 웹소켓 연결을 완전히 재설정하는 함수
 const reconnectWebSocket = () => {
   try {
-    //console.log("웹소켓 연결 재설정 시작");
+    console.log("웹소켓 연결 재설정 시작");
     
     // 모든 구독 해제
     Object.keys(activeSubscriptions).forEach(destination => {
@@ -302,13 +341,13 @@ const reconnectWebSocket = () => {
       webSocketFactory: () => newSocket,
       connectHeaders: {},
       debug: (str) => {
-        //console.log("[STOMP]", str);
+        console.log("[STOMP]", str);
       },
       reconnectDelay: 5000,
       heartbeatIncoming: 25000,
       heartbeatOutgoing: 25000,
       onConnect: () => {
-        //console.log("✅ 웹소켓 재연결 성공");
+        console.log("✅ 웹소켓 재연결 성공");
         stompClientConnected = true;
         
         // 연결 성공 시 대기 중인 구독 처리
@@ -329,7 +368,7 @@ const reconnectWebSocket = () => {
     
     return true;
   } catch (error) {
-    //console.error("웹소켓 재연결 실패:", error);
+    console.error("웹소켓 재연결 실패:", error);
     return false;
   }
 };
@@ -337,10 +376,217 @@ const reconnectWebSocket = () => {
 // 웹소켓 연결 상태 확인 함수
 const isConnected = () => {
   // 단순히 플래그만 확인하는 것이 아니라 실제 STOMP 클라이언트의 상태까지 확인
-  return stompClientConnected && !!stompClient.connected;
+  const connected = stompClientConnected && !!stompClient.connected;
+  console.log(`[CONNECTION] WebSocket 연결 상태 확인: ${connected ? '연결됨' : '연결안됨'}`);
+  return connected;
 };
 
-stompClient.activate();
+// 연결 상태를 비동기적으로 확인하고 대기하는 함수 추가
+export const waitForConnection = async (timeout = 5000): Promise<boolean> => {
+  console.log(`[CONNECTION] 연결 완료 대기 시작 (최대 ${timeout}ms)`);
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < timeout) {
+    if (stompClient.connected) {
+      console.log(`[CONNECTION] 연결 완료됨 (${Date.now() - startTime}ms 소요)`);
+      stompClientConnected = true;
+      return true;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  
+  console.log(`[CONNECTION] 연결 대기 시간 초과 (${timeout}ms)`);
+  return false;
+};
 
-export default stompClient;
-export { subscribe, unsubscribe, publish, reconnectWebSocket, isConnected };
+// 안전한 구독 함수 - 연결 확인 및 중복 구독 방지
+export const safeSubscribe = async (
+  destination: string, 
+  callback: (message: any) => void
+): Promise<boolean> => {
+  console.log(`[SAFE-SUBSCRIBE] ${destination} 안전 구독 시도`);
+  
+  // 이미 구독 중인지 확인
+  if (activeSubscriptions[destination]) {
+    console.log(`[SAFE-SUBSCRIBE] ${destination}에 대한 기존 구독 발견, 재사용`);
+    return true;
+  }
+  
+  // 연결 상태 확인
+  if (!stompClient.connected) {
+    console.log(`[SAFE-SUBSCRIBE] 연결되지 않음, 대기 시작`);
+    
+    // 연결될 때까지 대기 (최대 3초)
+    const connectionSuccess = await waitForConnection(3000);
+    
+    // 여전히 연결되지 않았다면 재연결 시도
+    if (!connectionSuccess) {
+      console.log(`[SAFE-SUBSCRIBE] 연결 대기 시간 초과, 재연결 시도`);
+      const reconnectSuccess = await reconnectWebSocket();
+      
+      if (!reconnectSuccess) {
+        console.log(`[SAFE-SUBSCRIBE] 재연결 실패, 구독 불가: ${destination}`);
+        return false;
+      }
+      
+      // 재연결 후 추가 대기
+      await waitForConnection(2000);
+    }
+  }
+  
+  // 여기까지 왔다면 연결된 상태여야 함
+  if (!stompClient.connected) {
+    console.log(`[SAFE-SUBSCRIBE] 모든 시도 후에도 연결 실패, 구독 불가: ${destination}`);
+    return false;
+  }
+  
+  // 연결됐을 때 구독 시도
+  try {
+    const subscription = stompClient.subscribe(destination, (message) => {
+      console.log(`[SAFE-MESSAGE] ${destination} 메시지 수신:`, 
+        typeof message.body === 'string' 
+          ? message.body.substring(0, 30) + (message.body.length > 30 ? '...' : '') 
+          : '[비문자열]');
+      
+      try {
+        // JSON 파싱 시도
+        const parsedMessage = JSON.parse(message.body);
+        callback(parsedMessage);
+      } catch (error) {
+        // JSON 파싱 실패 시 기존 처리 로직 활용
+        if (message.body.includes("WebSocketChatMessageResponse[")) {
+          const javaObject = parseJavaObjectString(message.body);
+          if (javaObject) {
+            callback(javaObject);
+            return;
+          }
+        }
+        
+        // 다른 특수 메시지 처리
+        if (destination === "/topic/lobby" && message.body.startsWith("ROOM_CREATED:")) {
+          const roomId = message.body.split(":")[1];
+          callback({
+            type: "ROOM_CREATED",
+            roomId: parseInt(roomId),
+            timestamp: Date.now()
+          });
+          return;
+        }
+        
+        // 채팅 메시지 특수 처리
+        if (destination.includes('/chat')) {
+          try {
+            const roomId = destination.includes('/chat/') 
+              ? destination.split('/chat/')[1] 
+              : destination.split('/').pop() || "unknown";
+            
+            callback({
+              type: "CHAT",
+              content: message.body,
+              senderId: "system",
+              senderName: "System",
+              timestamp: Date.now(),
+              roomId: roomId
+            });
+          } catch (chatError) {
+            callback({
+              type: "SYSTEM",
+              content: "메시지 처리 중 오류가 발생했습니다.",
+              senderId: "system",
+              senderName: "System",
+              timestamp: Date.now()
+            });
+          }
+        } else {
+          callback(message.body);
+        }
+      }
+    });
+    
+    console.log(`[SAFE-SUBSCRIBE] ${destination} 구독 성공`);
+    activeSubscriptions[destination] = subscription;
+    return true;
+  } catch (error) {
+    console.error(`[SAFE-SUBSCRIBE] ${destination} 구독 중 오류 발생:`, error);
+    return false;
+  }
+};
+
+// 안전한 발행 함수 - 연결 확인 및 대기 후 발행
+export const safePublish = async (destination: string, body: any): Promise<boolean> => {
+  console.log(`[SAFE-PUBLISH] ${destination} 안전 발행 시도`);
+  
+  // 연결 상태 확인
+  if (!stompClient.connected) {
+    console.log(`[SAFE-PUBLISH] 연결되지 않음, 대기 시작`);
+    
+    // 연결될 때까지 대기 (최대 3초)
+    const connectionSuccess = await waitForConnection(3000);
+    
+    // 여전히 연결되지 않았다면 재연결 시도
+    if (!connectionSuccess) {
+      console.log(`[SAFE-PUBLISH] 연결 대기 시간 초과, 재연결 시도`);
+      const reconnectSuccess = await reconnectWebSocket();
+      
+      if (!reconnectSuccess) {
+        console.log(`[SAFE-PUBLISH] 재연결 실패, 발행 불가: ${destination}`);
+        return false;
+      }
+      
+      // 재연결 후 추가 대기
+      await waitForConnection(2000);
+    }
+  }
+  
+  // 여기까지 왔다면 연결된 상태여야 함
+  if (!stompClient.connected) {
+    console.log(`[SAFE-PUBLISH] 모든 시도 후에도 연결 실패, 발행 불가: ${destination}`);
+    return false;
+  }
+  
+  // 연결됐을 때 발행 시도
+  try {
+    stompClient.publish({
+      destination,
+      body: JSON.stringify(body),
+    });
+    console.log(`[SAFE-PUBLISH] ${destination} 발행 성공`);
+    return true;
+  } catch (error) {
+    console.error(`[SAFE-PUBLISH] ${destination} 발행 중 오류 발생:`, error);
+    return false;
+  }
+};
+
+// 웹소켓 활성화 시 연결 성공 확인 추가
+let activatePromise: Promise<boolean> | null = null;
+
+// 활성화 함수 개선
+export const activateAndWait = async (timeout = 5000): Promise<boolean> => {
+  if (activatePromise) {
+    return activatePromise;
+  }
+  
+  activatePromise = new Promise<boolean>(async (resolve) => {
+    console.log("[ACTIVATE] STOMP 클라이언트 활성화 및 연결 대기 시작");
+    stompClient.activate();
+    
+    const connected = await waitForConnection(timeout);
+    resolve(connected);
+    
+    // 완료 후 Promise 초기화
+    setTimeout(() => {
+      activatePromise = null;
+    }, 100);
+  });
+  
+  return activatePromise;
+};
+
+// 기존 클라이언트 활성화 코드를 Promise 기반으로 변경
+console.log("STOMP 클라이언트 활성화 시작");
+activateAndWait(10000).then(success => {
+  console.log(`STOMP 클라이언트 초기화 ${success ? '성공' : '실패'}`);
+});
+
+export { subscribe, unsubscribe, publish, reconnectWebSocket, isConnected, stompClient };
