@@ -25,4 +25,6 @@ export interface FriendSearchResult {
 export interface FriendModalProps {
   isOpen: boolean;
   onClose: () => void;
+  friendRequestCount?: number;
+  onRequestCountChange?: (count: number) => void;
 } 
