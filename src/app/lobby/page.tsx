@@ -3011,7 +3011,7 @@ const initializeWebSocket = async () => {
                   className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="MULTIPLE_CHOICE">객관식</option>
-                  <option value="TRUE_FALSE">O/X</option>
+                  {/* <option value="TRUE_FALSE">O/X</option> */}
                 </select>
               </div>
               
