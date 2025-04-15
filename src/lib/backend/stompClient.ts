@@ -153,6 +153,45 @@ const performSubscribe = (
       }
       
       try {
+        // JSON 파싱 시도 전에 문자열 확인 로직 추가
+        if (typeof message.body === 'string') {
+          // ROOM_DELETED: 형식 메시지 특수 처리
+          if (message.body.startsWith("ROOM_DELETED:")) {
+            const roomId = message.body.split(":")[1];
+            console.log(`[MESSAGE] 방 삭제 메시지 감지: ${roomId}`);
+            callback({
+              type: "ROOM_DELETED",
+              roomId: parseInt(roomId),
+              timestamp: Date.now()
+            });
+            return;
+          }
+          
+          // ROOM_UPDATED: 형식 메시지 특수 처리
+          if (message.body.startsWith("ROOM_UPDATED:")) {
+            const roomId = message.body.split(":")[1];
+            console.log(`[MESSAGE] 방 업데이트 메시지 감지: ${roomId}`);
+            callback({
+              type: "ROOM_UPDATED",
+              roomId: parseInt(roomId),
+              timestamp: Date.now()
+            });
+            return;
+          }
+          
+          // ROOM_CREATED: 형식 메시지 특수 처리
+          if (message.body.startsWith("ROOM_CREATED:")) {
+            const roomId = message.body.split(":")[1];
+            console.log(`[MESSAGE] 방 생성 메시지 감지: ${roomId}`);
+            callback({
+              type: "ROOM_CREATED",
+              roomId: parseInt(roomId),
+              timestamp: Date.now()
+            });
+            return;
+          }
+        }
+        
         // JSON 파싱 시도
         const parsedMessage = JSON.parse(message.body);
         console.log(`[MESSAGE] JSON 파싱 성공:`, 
@@ -164,7 +203,7 @@ const performSubscribe = (
         console.log(`[MESSAGE] JSON 파싱 실패, 대체 처리 시도:`, error);
         
         // JSON 파싱 실패 시 Java 객체 문자열 파싱 시도
-        if (message.body.includes("WebSocketChatMessageResponse[")) {
+        if (typeof message.body === 'string' && message.body.includes("WebSocketChatMessageResponse[")) {
           const javaObject = parseJavaObjectString(message.body);
           if (javaObject) {
             //console.debug("Java 객체 문자열 파싱 성공:", javaObject);
@@ -173,71 +212,55 @@ const performSubscribe = (
           }
         }
         
-        // ROOM_CREATED 특수 메시지 처리
-        if (destination === "/topic/lobby" && message.body.startsWith("ROOM_CREATED:")) {
-          const roomId = message.body.split(":")[1];
-          //console.debug("방 생성 메시지 감지:", roomId);
-          callback({
-            type: "ROOM_CREATED",
-            roomId: parseInt(roomId),
-            timestamp: Date.now()
-          });
-          return;
-        }
-        
-        // 채팅 메시지 특수 처리
-        if (destination.includes('/chat')) {
-          //console.log(`채팅 메시지 처리 시도 (${destination}):`, message.body);
-          
-          try {
-            // 문자열이 아닌 경우 처리
-            if (typeof message.body !== 'string') {
-              //console.log("채팅 메시지가 문자열이 아님. 직접 전달:", message.body);
-              callback(message.body);
+        // 일반 문자열 메시지는 그대로 전달하기 전에 채팅 메시지인지 확인
+        if (typeof message.body === 'string') {
+          // 채팅 메시지 특수 처리
+          if (destination.includes('/chat')) {
+            try {
+              // 문자열에서 중괄호 추출 시도
+              const bracketMatch = message.body.match(/{.*}/);
+              if (bracketMatch) {
+                try {
+                  const jsonContent = JSON.parse(bracketMatch[0]);
+                  console.log("[MESSAGE] 중괄호에서 JSON 추출 성공");
+                  callback(jsonContent);
+                  return;
+                } catch (e) {
+                  console.log("[MESSAGE] 중괄호 내용 파싱 실패");
+                }
+              }
+              
+              // 채팅 메시지용 기본 객체 생성
+              const roomId = destination.includes('/chat/') 
+                ? destination.split('/chat/')[1] 
+                : destination.split('/').pop() || "unknown";
+              
+              callback({
+                type: "CHAT",
+                content: message.body,
+                senderId: "system",
+                senderName: "System",
+                timestamp: Date.now(),
+                roomId: roomId
+              });
+              return;
+            } catch (chatError) {
+              console.error("[MESSAGE] 채팅 메시지 처리 중 오류:", chatError);
+              callback({
+                type: "SYSTEM",
+                content: "메시지 처리 중 오류가 발생했습니다.",
+                senderId: "system",
+                senderName: "System",
+                timestamp: Date.now()
+              });
               return;
             }
-            
-            // 문자열에서 중괄호 추출 시도
-            const bracketMatch = message.body.match(/{.*}/);
-            if (bracketMatch) {
-              try {
-                const jsonContent = JSON.parse(bracketMatch[0]);
-                //console.log("중괄호에서 JSON 추출 성공:", jsonContent);
-                callback(jsonContent);
-                return;
-              } catch (e) {
-                //console.log("중괄호 내용 파싱 실패:", e);
-              }
-            }
-            
-            // 채팅 메시지용 기본 객체 생성
-            //console.log("기본 채팅 메시지 객체 생성");
-            const roomId = destination.includes('/chat/') 
-              ? destination.split('/chat/')[1] 
-              : destination.split('/').pop() || "unknown";
-            
-            callback({
-              type: "CHAT",
-              content: message.body,
-              senderId: "system",
-              senderName: "System",
-              timestamp: Date.now(),
-              roomId: roomId
-            });
-          } catch (chatError) {
-            //console.error("채팅 메시지 처리 중 오류:", chatError);
-            callback({
-              type: "SYSTEM",
-              content: "메시지 처리 중 오류가 발생했습니다.",
-              senderId: "system",
-              senderName: "System",
-              timestamp: Date.now()
-            });
           }
-        } else {
-          // 기타 메시지는 원본 반환
-          //console.log("기타 메시지 원본 반환:", message.body);
+          
+          // 채팅 메시지가 아닌 일반 문자열 메시지
+          console.log(`[MESSAGE] 일반 문자열 메시지 직접 전달: ${message.body}`);
           callback(message.body);
+          return;
         }
       }
     });
@@ -471,6 +494,45 @@ export const safeSubscribe = async (
         typeof message.body === 'string' 
           ? message.body.substring(0, 30) + (message.body.length > 30 ? '...' : '') 
           : '[비문자열]');
+      
+      // JSON 파싱 시도 전에 문자열 확인 로직 추가
+      if (typeof message.body === 'string') {
+        // ROOM_DELETED: 형식 메시지 특수 처리
+        if (message.body.startsWith("ROOM_DELETED:")) {
+          const roomId = message.body.split(":")[1];
+          console.log(`[SAFE-MESSAGE] 방 삭제 메시지 감지: ${roomId}`);
+          callback({
+            type: "ROOM_DELETED",
+            roomId: parseInt(roomId),
+            timestamp: Date.now()
+          });
+          return;
+        }
+        
+        // ROOM_UPDATED: 형식 메시지 특수 처리
+        if (message.body.startsWith("ROOM_UPDATED:")) {
+          const roomId = message.body.split(":")[1];
+          console.log(`[SAFE-MESSAGE] 방 업데이트 메시지 감지: ${roomId}`);
+          callback({
+            type: "ROOM_UPDATED",
+            roomId: parseInt(roomId),
+            timestamp: Date.now()
+          });
+          return;
+        }
+        
+        // ROOM_CREATED: 형식 메시지 특수 처리
+        if (message.body.startsWith("ROOM_CREATED:")) {
+          const roomId = message.body.split(":")[1];
+          console.log(`[SAFE-MESSAGE] 방 생성 메시지 감지: ${roomId}`);
+          callback({
+            type: "ROOM_CREATED",
+            roomId: parseInt(roomId),
+            timestamp: Date.now()
+          });
+          return;
+        }
+      }
       
       try {
         // JSON 파싱 시도

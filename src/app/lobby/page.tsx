@@ -633,69 +633,76 @@ function LobbyContent({
               });
               
               // 로비 접속자 목록 구독
-              subscribe("/topic/lobby/users", async (data: User[]) => {
+              subscribe("/topic/lobby/users", async (data: any) => {
                 console.log("[LOBBY] 로비 유저 목록 수신:", data);
                 
-                // 온라인 사용자 ID 목록 추출 및 업데이트
-                const onlineUserIds = data.map(user => user.id);
-                updateOnlineUserIds(onlineUserIds);
-                
-                // 아바타 정보 추가
-                const usersWithAvatars = await fetchUserAvatars(data);
-                
-                // 현재 상태의 activeUsers에서 location과 roomId 정보 유지
-                const updatedUsers = usersWithAvatars.map(newUser => {
-                  // 기존 사용자 정보 찾기
-                  const existingUser = activeUsers.find(u => u.id === newUser.id);
+                // 데이터가 배열인 경우 (전체 유저 목록)
+                if (Array.isArray(data)) {
+                  // 온라인 사용자 ID 목록 추출 및 업데이트
+                  const onlineUserIds = data.map(user => user.id);
+                  updateOnlineUserIds(onlineUserIds);
                   
-                  // 기존 사용자 정보가 있고 IN_ROOM 상태라면 그 정보 유지
-                  if (existingUser && existingUser.location === "IN_ROOM") {
+                  // 아바타 정보 추가
+                  const usersWithAvatars = await fetchUserAvatars(data);
+                  
+                  // 현재 상태의 activeUsers에서 location과 roomId 정보 유지
+                  const updatedUsers = usersWithAvatars.map(newUser => {
+                    // 기존 사용자 정보 찾기
+                    const existingUser = activeUsers.find(u => u.id === newUser.id);
+                    
+                    // 기존 사용자 정보가 있고 IN_ROOM 상태라면 그 정보 유지
+                    if (existingUser && existingUser.location === "IN_ROOM") {
+                      return {
+                        ...newUser,
+                        location: existingUser.location,
+                        roomId: existingUser.roomId,
+                        status: existingUser.status
+                      };
+                    }
+                    
+                    // 새로 받은 정보에 location이 있으면 그 정보 사용
+                    if (newUser.location === "IN_ROOM") {
+                      return newUser;
+                    }
+                    
+                    // 그 외에는 기본적으로 로비에 있는 것으로 설정
                     return {
                       ...newUser,
-                      location: existingUser.location,
-                      roomId: existingUser.roomId,
-                      status: existingUser.status
+                      location: newUser.location || "IN_LOBBY",
+                      status: newUser.status || "online"
                     };
-                  }
-                  
-                  // 새로 받은 정보에 location이 있으면 그 정보 사용
-                  if (newUser.location === "IN_ROOM") {
-                    return newUser;
-                  }
-                  
-                  // 그 외에는 기본적으로 로비에 있는 것으로 설정
-                  return {
-                    ...newUser,
-                    location: newUser.location || "IN_LOBBY",
-                    status: newUser.status || "online"
-                  };
-                });
-                
-                // 현재 사용자를 목록 최상단으로 정렬
-                if (currentUser) {
-                  const sortedUsers = [...updatedUsers].sort((a, b) => {
-                    if (a.id === currentUser.id) return -1;
-                    if (b.id === currentUser.id) return 1;
-                    return 0;
                   });
-                  setActiveUsers(sortedUsers);
-                } else {
-                  setActiveUsers(updatedUsers);
-                }
-                
-                setIsConnected(true);
-                
-                // 현재 로그인한 사용자의 정보도 업데이트
-                if (currentUser) {
-                  const updatedCurrentUser = updatedUsers.find(user => user.id === currentUser.id);
-                  if (updatedCurrentUser) {
-                    // User 타입에 맞게 roomId가 null이면 undefined로 변환
-                    const typeSafeUser = {
-                      ...updatedCurrentUser,
-                      roomId: updatedCurrentUser.roomId === null ? undefined : updatedCurrentUser.roomId
-                    };
-                    setCurrentUser(typeSafeUser as User);
+                  
+                  // 현재 사용자를 목록 최상단으로 정렬
+                  if (currentUser) {
+                    const sortedUsers = [...updatedUsers].sort((a, b) => {
+                      if (a.id === currentUser.id) return -1;
+                      if (b.id === currentUser.id) return 1;
+                      return 0;
+                    });
+                    setActiveUsers(sortedUsers);
+                  } else {
+                    setActiveUsers(updatedUsers);
                   }
+                  
+                  setIsConnected(true);
+                  
+                  // 현재 로그인한 사용자의 정보도 업데이트
+                  if (currentUser) {
+                    const updatedCurrentUser = updatedUsers.find(user => user.id === currentUser.id);
+                    if (updatedCurrentUser) {
+                      // User 타입에 맞게 roomId가 null이면 undefined로 변환
+                      const typeSafeUser = {
+                        ...updatedCurrentUser,
+                        roomId: updatedCurrentUser.roomId === null ? undefined : updatedCurrentUser.roomId
+                      };
+                      setCurrentUser(typeSafeUser as User);
+                    }
+                  }
+                }
+                // 데이터가 단일 객체인 경우 (USER_LOCATION_UPDATE 등)
+                else if (data && typeof data === 'object' && data.type) {
+                  receiveMessage(data);
                 }
               });
               
@@ -773,69 +780,76 @@ function LobbyContent({
     });
 
     // 로비 접속자 목록 구독
-    subscribe("/topic/lobby/users", async (data: User[]) => {
+    subscribe("/topic/lobby/users", async (data: any) => {
       console.log("[LOBBY] 로비 유저 목록 수신:", data);
       
-      // 온라인 사용자 ID 목록 추출 및 업데이트
-      const onlineUserIds = data.map(user => user.id);
-      updateOnlineUserIds(onlineUserIds);
-      
-      // 아바타 정보 추가
-      const usersWithAvatars = await fetchUserAvatars(data);
-      
-      // 현재 상태의 activeUsers에서 location과 roomId 정보 유지
-      const updatedUsers = usersWithAvatars.map(newUser => {
-        // 기존 사용자 정보 찾기
-        const existingUser = activeUsers.find(u => u.id === newUser.id);
+      // 데이터가 배열인 경우 (전체 유저 목록)
+      if (Array.isArray(data)) {
+        // 온라인 사용자 ID 목록 추출 및 업데이트
+        const onlineUserIds = data.map(user => user.id);
+        updateOnlineUserIds(onlineUserIds);
         
-        // 기존 사용자 정보가 있고 IN_ROOM 상태라면 그 정보 유지
-        if (existingUser && existingUser.location === "IN_ROOM") {
+        // 아바타 정보 추가
+        const usersWithAvatars = await fetchUserAvatars(data);
+        
+        // 현재 상태의 activeUsers에서 location과 roomId 정보 유지
+        const updatedUsers = usersWithAvatars.map(newUser => {
+          // 기존 사용자 정보 찾기
+          const existingUser = activeUsers.find(u => u.id === newUser.id);
+          
+          // 기존 사용자 정보가 있고 IN_ROOM 상태라면 그 정보 유지
+          if (existingUser && existingUser.location === "IN_ROOM") {
+            return {
+              ...newUser,
+              location: existingUser.location,
+              roomId: existingUser.roomId,
+              status: existingUser.status
+            };
+          }
+          
+          // 새로 받은 정보에 location이 있으면 그 정보 사용
+          if (newUser.location === "IN_ROOM") {
+            return newUser;
+          }
+          
+          // 그 외에는 기본적으로 로비에 있는 것으로 설정
           return {
             ...newUser,
-            location: existingUser.location,
-            roomId: existingUser.roomId,
-            status: existingUser.status
+            location: newUser.location || "IN_LOBBY",
+            status: newUser.status || "online"
           };
-        }
-        
-        // 새로 받은 정보에 location이 있으면 그 정보 사용
-        if (newUser.location === "IN_ROOM") {
-          return newUser;
-        }
-        
-        // 그 외에는 기본적으로 로비에 있는 것으로 설정
-        return {
-          ...newUser,
-          location: newUser.location || "IN_LOBBY",
-          status: newUser.status || "online"
-        };
-      });
-      
-      // 현재 사용자를 목록 최상단으로 정렬
-      if (currentUser) {
-        const sortedUsers = [...updatedUsers].sort((a, b) => {
-          if (a.id === currentUser.id) return -1;
-          if (b.id === currentUser.id) return 1;
-          return 0;
         });
-        setActiveUsers(sortedUsers);
-      } else {
-        setActiveUsers(updatedUsers);
-      }
-      
-      setIsConnected(true);
-      
-      // 현재 로그인한 사용자의 정보도 업데이트
-      if (currentUser) {
-        const updatedCurrentUser = updatedUsers.find(user => user.id === currentUser.id);
-        if (updatedCurrentUser) {
-          // User 타입에 맞게 roomId가 null이면 undefined로 변환
-          const typeSafeUser = {
-            ...updatedCurrentUser,
-            roomId: updatedCurrentUser.roomId === null ? undefined : updatedCurrentUser.roomId
-          };
-          setCurrentUser(typeSafeUser as User);
+        
+        // 현재 사용자를 목록 최상단으로 정렬
+        if (currentUser) {
+          const sortedUsers = [...updatedUsers].sort((a, b) => {
+            if (a.id === currentUser.id) return -1;
+            if (b.id === currentUser.id) return 1;
+            return 0;
+          });
+          setActiveUsers(sortedUsers);
+        } else {
+          setActiveUsers(updatedUsers);
         }
+        
+        setIsConnected(true);
+        
+        // 현재 로그인한 사용자의 정보도 업데이트
+        if (currentUser) {
+          const updatedCurrentUser = updatedUsers.find(user => user.id === currentUser.id);
+          if (updatedCurrentUser) {
+            // User 타입에 맞게 roomId가 null이면 undefined로 변환
+            const typeSafeUser = {
+              ...updatedCurrentUser,
+              roomId: updatedCurrentUser.roomId === null ? undefined : updatedCurrentUser.roomId
+            };
+            setCurrentUser(typeSafeUser as User);
+          }
+        }
+      } 
+      // 데이터가 단일 객체인 경우 (USER_LOCATION_UPDATE 등)
+      else if (data && typeof data === 'object' && data.type) {
+        receiveMessage(data);
       }
     });
 
@@ -1210,6 +1224,64 @@ function LobbyContent({
 
   // 메시지 타입에 따른 처리
   const receiveMessage = (message: any) => {
+    // 문자열 메시지 처리 (예: "ROOM_DELETED:13", "ROOM_UPDATED:13")
+    if (typeof message === 'string') {
+      console.log("[CLEAR-TRACE] 문자열 메시지 수신:", message);
+      
+      // 방 삭제 메시지 처리
+      if (message.startsWith("ROOM_DELETED:")) {
+        const roomId = message.split(":")[1];
+        console.log(`[CLEAR-TRACE] 방 ID ${roomId} 삭제 메시지 수신`);
+        
+        setRooms(prevRooms => {
+          return prevRooms.filter(room => room.id !== parseInt(roomId));
+        });
+        return;
+      }
+      
+      // 방 업데이트 메시지 처리
+      if (message.startsWith("ROOM_UPDATED:")) {
+        const roomId = message.split(":")[1];
+        console.log(`[CLEAR-TRACE] 방 ID ${roomId} 업데이트 메시지 수신`);
+        
+        // 업데이트된 방 정보 가져오기
+        fetch(`/api/v1/rooms/${roomId}`)
+          .then(res => {
+            if (!res.ok) {
+              throw new Error(`방 정보 요청 실패: ${res.status}`);
+            }
+            return res.json();
+          })
+          .then(data => {
+            if (data && data.data) {
+              const updatedRoom = data.data;
+              console.log(`[CLEAR-TRACE] 방 ${roomId} 정보 수신:`, updatedRoom);
+              
+              setRooms(prevRooms => {
+                const roomExists = prevRooms.some(room => room.id === parseInt(roomId));
+                
+                if (roomExists) {
+                  return prevRooms.map(room => 
+                    room.id === parseInt(roomId) ? { ...room, ...updatedRoom } : room
+                  );
+                } else {
+                  return [...prevRooms, updatedRoom];
+                }
+              });
+            }
+          })
+          .catch(error => {
+            console.error("[CLEAR-TRACE] 방 정보 업데이트 실패:", error);
+            // 오류 발생 시 전체 목록 새로고침
+            loadRooms();
+          });
+        return;
+      }
+      
+      // 기타 문자열 메시지는 그대로 처리
+      return;
+    }
+    
     // 채팅 메시지인 경우
     if (message.type === "CHAT" || (!message.type && message.content)) {
       // 메시지 내용에서 불필요한 따옴표 제거
@@ -1328,18 +1400,15 @@ function LobbyContent({
       return;
     }
     
-    // 방 삭제 메시지인 경우
+    // 방 삭제 메시지인 경우 - 객체 형태로 받을 때
     if (message === "ROOM_DELETED" || 
-        (typeof message === 'string' && message.startsWith && message.startsWith("ROOM_DELETED:")) ||
-        message.type === "ROOM_DELETED") {
+        (typeof message === 'object' && message.type === "ROOM_DELETED")) {
       
       console.log("방 삭제 알림 수신:", message);
       let roomId = null;
       
       // 메시지 형식에 따른 룸 ID 추출
-      if (typeof message === 'string' && message.startsWith && message.startsWith("ROOM_DELETED:")) {
-        roomId = message.split(":")[1];
-      } else if (message.roomId) {
+      if (message.roomId) {
         roomId = message.roomId;
       } else if (message.id) {
         roomId = message.id;
@@ -1360,10 +1429,9 @@ function LobbyContent({
       return;
     }
     
-    // 방 업데이트 메시지인 경우 (방장 변경, 인원수 변경 등)
+    // 방 업데이트 메시지인 경우 - 객체 형태로 받을 때
     if (message === "ROOM_UPDATED" || 
-        (typeof message === 'string' && message.startsWith && message.startsWith("ROOM_UPDATED:")) ||
-        message.type === "ROOM_UPDATED") {
+        (typeof message === 'object' && message.type === "ROOM_UPDATED")) {
       
       console.log("방 업데이트 알림 수신:", message);
       let roomId = null;
@@ -1371,11 +1439,7 @@ function LobbyContent({
       let newStatus = null;
       
       // 메시지 형식에 따른 룸 ID 추출
-      if (typeof message === 'string' && message.startsWith && message.startsWith("ROOM_UPDATED:")) {
-        roomId = message.split(":")[1];
-        // 문자열 형식에서는 명시적 상태가 없지만 업데이트를 위해 백엔드에서 가져온다
-        hasStatusUpdate = true;
-      } else if (message.roomId) {
+      if (message.roomId) {
         roomId = message.roomId;
         if (message.status) {
           hasStatusUpdate = true;
@@ -1404,46 +1468,6 @@ function LobbyContent({
                 return room;
               });
             });
-          } else if (hasStatusUpdate) {
-            // 상태 정보 없이 업데이트 메시지만 있는 경우(문자열 형식 등), 즉시 백엔드에서 최신 정보 가져오기
-            console.log(`[CLEAR-TRACE] 방 ${roomId} 상태 업데이트 - 백엔드에서 최신 정보 가져오기 시작`);
-            
-            // 즉시 API 호출하여 방 정보 가져오기 
-            fetch(`/api/v1/rooms/${roomId}`)
-              .then(res => {
-                if (!res.ok) {
-                  throw new Error(`방 정보 요청 실패: ${res.status}`);
-                }
-                return res.json();
-              })
-              .then(data => {
-                if (data && data.data) {
-                  const updatedRoom = data.data;
-                  console.log(`[CLEAR-TRACE] 방 ${roomId} 정보 즉시 수신:`, updatedRoom);
-                  console.log(`[CLEAR-TRACE] 방 ${roomId} 상태:`, updatedRoom.status);
-                  
-                  // 우선 상태 즉시 업데이트 
-                  setRooms(prevRooms => {
-                    const roomExists = prevRooms.some(room => room.id === parseInt(roomId));
-                    
-                    if (roomExists) {
-                      const updatedRooms = prevRooms.map(room => {
-                        if (room.id === parseInt(roomId)) {
-                          console.log(`[CLEAR-TRACE] 방 ${roomId} 상태 즉시 반영: ${room.status} -> ${updatedRoom.status}`);
-                          return { ...room, ...updatedRoom };
-                        }
-                        return room;
-                      });
-                      return updatedRooms;
-                    } else {
-                      return [...prevRooms, updatedRoom];
-                    }
-                  });
-                }
-              })
-              .catch(error => {
-                console.error("[CLEAR-TRACE] 방 정보 즉시 업데이트 실패:", error);
-              });
           }
           
           // 약간의 지연 후 백엔드에서 다시 최신 정보 가져오기 (네트워크 지연 고려)
@@ -1505,7 +1529,8 @@ function LobbyContent({
     }
     
     // 사용자 상태 메시지인 경우
-    if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || message.type === "STATUS_UPDATE" || message.type === "USER_LOCATION_UPDATE") {
+    if (message.type === "USER_CONNECT" || message.type === "USER_DISCONNECT" || 
+        message.type === "STATUS_UPDATE" || message.type === "USER_LOCATION_UPDATE") {
       // 메시지 정보 로깅
       console.log(`[CLEAR-TRACE] 사용자 상태 업데이트 수신: 타입=${message.type}, 사용자=${message.senderName}, 위치=${message.location || "알 수 없음"}, 방=${message.roomId || "없음"}, 상태=${message.status || "기본"}`);
       
@@ -1616,8 +1641,86 @@ const initializeWebSocket = async () => {
     
     console.log("[INIT] 안전 구독 시작 - 기타 토픽");
     await safeSubscribe("/topic/lobby", receiveMessage);
-    await safeSubscribe("/topic/lobby/status", receiveMessage);
-    await safeSubscribe("/topic/lobby/users", receiveMessage);
+    
+    // 로비 상태 업데이트 구독 - 단일 객체 메시지도 처리할 수 있도록 특별 처리
+    await safeSubscribe("/topic/lobby/status", (message) => {
+      console.log("[SAFE-MESSAGE] /topic/lobby/status 메시지 수신:", message);
+      receiveMessage(message);
+    });
+    
+    // 로비 사용자 목록 구독 - 배열과 단일 객체 모두 처리할 수 있도록 수정
+    await safeSubscribe("/topic/lobby/users", (data) => {
+      console.log("[RECONNECT] 로비 유저 목록/상태 수신:", data);
+      
+      // 배열인 경우 (전체 유저 목록)
+      if (Array.isArray(data)) {
+        // 온라인 사용자 ID 목록 추출 및 업데이트
+        const onlineUserIds = data.map(user => user.id);
+        updateOnlineUserIds(onlineUserIds);
+        
+        // 아바타 정보 추가
+        fetchUserAvatars(data).then(usersWithAvatars => {
+          // 현재 상태의 activeUsers에서 location과 roomId 정보 유지
+          const updatedUsers = usersWithAvatars.map(newUser => {
+            // 기존 사용자 정보 찾기
+            const existingUser = activeUsers.find(u => u.id === newUser.id);
+            
+            // 기존 사용자 정보가 있고 IN_ROOM 상태라면 그 정보 유지
+            if (existingUser && existingUser.location === "IN_ROOM") {
+              return {
+                ...newUser,
+                location: existingUser.location,
+                roomId: existingUser.roomId,
+                status: existingUser.status
+              };
+            }
+            
+            // 새로 받은 정보에 location이 있으면 그 정보 사용
+            if (newUser.location === "IN_ROOM") {
+              return newUser;
+            }
+            
+            // 그 외에는 기본적으로 로비에 있는 것으로 설정
+            return {
+              ...newUser,
+              location: newUser.location || "IN_LOBBY",
+              status: newUser.status || "online"
+            };
+          });
+          
+          // 현재 사용자를 목록 최상단으로 정렬
+          if (currentUser) {
+            const sortedUsers = [...updatedUsers].sort((a, b) => {
+              if (a.id === currentUser.id) return -1;
+              if (b.id === currentUser.id) return 1;
+              return 0;
+            });
+            setActiveUsers(sortedUsers);
+          } else {
+            setActiveUsers(updatedUsers);
+          }
+          
+          setIsConnected(true);
+          
+          // 현재 로그인한 사용자의 정보도 업데이트
+          if (currentUser) {
+            const updatedCurrentUser = updatedUsers.find(user => user.id === currentUser.id);
+            if (updatedCurrentUser) {
+              // User 타입에 맞게 roomId가 null이면 undefined로 변환
+              const typeSafeUser = {
+                ...updatedCurrentUser,
+                roomId: updatedCurrentUser.roomId === null ? undefined : updatedCurrentUser.roomId
+              };
+              setCurrentUser(typeSafeUser as User);
+            }
+          }
+        });
+      } 
+      // 객체인 경우 (위치 업데이트 등)
+      else if (data && typeof data === 'object') {
+        receiveMessage(data);
+      }
+    });
     
     // 웹소켓 연결 상태 업데이트
     setIsConnected(true);
@@ -2381,7 +2484,6 @@ const initializeWebSocket = async () => {
           </>
         )}
       </div>
-
       {/* 닉네임 변경 모달 */}
       {showNicknameModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
@@ -3113,3 +3215,4 @@ export default function LobbyPage() {
     </AppLayout>
   );
 }
+
