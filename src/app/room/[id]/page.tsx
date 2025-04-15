@@ -820,26 +820,33 @@ export default function RoomPage() {
           
           // 로비에 사용자 상태 업데이트 전송
           publish(`/app/lobby/status`, {
-            type: "STATUS_UPDATE",
+            type: "USER_LOCATION_UPDATE",
             status: `게임방 ${roomId}번 입장`,
             location: "IN_ROOM",
             roomId: parseInt(roomId),
             userId: userData.id,
             nickname: userData.nickname,
+            senderId: userData.id.toString(),
+            senderName: userData.nickname,
             timestamp: Date.now()
           });
           
-          // 모든 사용자에게 자신이 방에 있음을 알림
-          setTimeout(() => {
-            publish(`/app/lobby/broadcast`, {
-              type: "USER_LOCATION_UPDATE",
-              userId: userData.id,
-              nickname: userData.nickname,
-              location: "IN_ROOM",
-              roomId: parseInt(roomId),
-              timestamp: Date.now()
-            });
-          }, 500);
+          // 3회 반복하여 전송 (확실하게 업데이트되도록)
+          for (let i = 0; i < 3; i++) {
+            setTimeout(() => {
+              publish(`/app/lobby/broadcast`, {
+                type: "USER_LOCATION_UPDATE",
+                userId: userData.id,
+                senderId: userData.id.toString(),
+                nickname: userData.nickname,
+                senderName: userData.nickname,
+                location: "IN_ROOM",
+                status: `게임방 ${roomId}번 입장`,
+                roomId: parseInt(roomId),
+                timestamp: Date.now() + i
+              });
+            }, 500 * (i + 1));
+          }
           
           // 플레이어 목록 설정
           setPlayers(prevPlayers => {
@@ -1242,7 +1249,7 @@ export default function RoomPage() {
 
       // 로비에 사용자 상태 업데이트 전송
       publish(`/app/lobby/status`, {
-        type: "STATUS_UPDATE",
+        type: "USER_LOCATION_UPDATE",
         status: "로비",
         location: "IN_LOBBY",
         roomId: null,
