@@ -124,6 +124,7 @@ function LobbyContent({
   const [isLoadingUser, setIsLoadingUser] = useState<boolean>(false);
   const [showRankingModal, setShowRankingModal] = useState<boolean>(false);
   const [showFriendModal, setShowFriendModal] = useState<boolean>(false);
+  const [friendRequestCount, setFriendRequestCount] = useState<number>(0);
   // 방 생성 모달 상태 추가
   const [showCreateRoomModal, setShowCreateRoomModal] = [externalShowCreateRoomModal, externalSetShowCreateRoomModal];
   // 방 생성 관련 상태 추가
@@ -1107,6 +1108,10 @@ function LobbyContent({
   // 친구 모달 토글 함수
   const toggleFriendModal = () => {
     setShowFriendModal(!showFriendModal);
+    // 모달을 열 때 친구 요청 목록 다시 가져오기
+    if (!showFriendModal) {
+      fetchFriendRequests();
+    }
   };
 
   // 메시지 타입에 따른 처리
@@ -1422,6 +1427,29 @@ function LobbyContent({
     handleJoinRoom(String(selectedRoom.id), roomPassword);
   };
 
+  // 친구 요청 목록을 가져오는 함수 추가
+  const fetchFriendRequests = async () => {
+    try {
+      const { getFriendRequests } = await import('@/components/friend/friendApi');
+      const requests = await getFriendRequests();
+      setFriendRequestCount(requests.length);
+    } catch (error) {
+      console.error("친구 요청 목록을 불러오는데 실패했습니다:", error);
+    }
+  };
+
+  // 컴포넌트 마운트 시 및 주기적으로 친구 요청 목록 가져오기
+  useEffect(() => {
+    if (currentUser) {
+      fetchFriendRequests();
+      
+      // 5분마다 친구 요청 목록 갱신
+      const interval = setInterval(fetchFriendRequests, 300000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [currentUser]);
+
   return (
     <div className="container mx-auto px-4 py-8 flex flex-col h-full">
       {/* 토스트 메시지 표시 */}
@@ -1449,10 +1477,15 @@ function LobbyContent({
                 onClick={toggleFriendModal}
                 className="group relative px-4 py-2 rounded-lg hover:bg-gray-700/50 transition-all"
               >
-                <div className="flex flex-col items-center">
+                <div className="flex flex-col items-center relative">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400 group-hover:text-blue-300" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z" />
                   </svg>
+                  {friendRequestCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+                      {friendRequestCount > 9 ? '9+' : friendRequestCount}
+                    </span>
+                  )}
                   <span className="text-xs text-gray-300 group-hover:text-white mt-1">친구</span>
                 </div>
                 <div className={`absolute bottom-0 left-1/2 transform -translate-x-1/2 w-1/2 h-0.5 bg-blue-500 ${showFriendModal ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-all`}></div>
@@ -2191,7 +2224,12 @@ function LobbyContent({
 
       {/* 친구 모달 */}
       {showFriendModal && (
-        <FriendModal isOpen={showFriendModal} onClose={() => setShowFriendModal(false)} />
+        <FriendModal 
+          isOpen={showFriendModal} 
+          onClose={() => setShowFriendModal(false)}
+          friendRequestCount={friendRequestCount}
+          onRequestCountChange={setFriendRequestCount}
+        />
       )}
 
       {/* 방 생성 모달 */}
