@@ -782,18 +782,17 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     setRespondedPlayers(new Set());
   };
   
-  // 마지막 문제 판단 함수 추가
-  const isLastQuestionCheck = () => {
-    // 세 가지 조건 중 하나라도 참이면 마지막 문제로 간주
-    const totalProblems = room?.problemCount || questions.length;
-    const serverMarkedAsLast = window.sessionStorage.getItem('isLastQuestion') === 'true';
-    const indexBasedCheck = currentQuestionIndex >= (totalProblems - 1);
+  // 마지막 문제인지 확인하는 함수
+  const checkIsLastQuestion = useCallback(() => {
+    // 총 문제 수 (room.problemCount를 우선적으로 사용)
+    const totalProblems = room?.problemCount || questions.filter(q => q !== null).length || 5;
     
-    const isLast = serverMarkedAsLast || indexBasedCheck;
-    console.log(`마지막 문제 체크: 서버 표시=${serverMarkedAsLast}, 인덱스 기반=${indexBasedCheck}, 현재=${currentQuestionIndex}, 총=${totalProblems}`);
+    // 인덱스는 0부터 시작하므로 마지막 문제는 totalProblems-1
+    const isLast = currentQuestionIndex >= totalProblems - 1;
     
+    console.log(`마지막 문제 체크: 현재=${currentQuestionIndex+1}, 총=${totalProblems}, 결과=${isLast}`);
     return isLast;
-  };
+  }, [currentQuestionIndex, questions, room?.problemCount]);
 
   // 타이머 만료 처리 - 최대한 단순화
   const handleTimerExpired = () => {
@@ -820,12 +819,9 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     }
     
     // 마지막 문제인지 확인 (정확한 판별)
-    const totalProblems = room?.problemCount || questions.length || 5;
+    const isLastQuestion = checkIsLastQuestion();
     
-    // 인덱스 기반 확인 (0-based index이므로 마지막 문제는 totalProblems-1)
-    const isLastQuestion = currentQuestionIndex >= totalProblems - 1;
-    
-    console.log(`타이머 만료: 현재 인덱스=${currentQuestionIndex}, 문제 총 개수=${totalProblems}, 마지막 문제=${isLastQuestion}`);
+    console.log(`타이머 만료: 현재 인덱스=${currentQuestionIndex}, 마지막 문제=${isLastQuestion}`);
     
     // 3초 후 자동으로 다음 문제로 이동 또는 게임 종료
     setTimeout(() => {
@@ -1530,7 +1526,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
               showResults={showResults}
               answerSubmitted={answerSubmitted}
               onNext={moveToNextQuestion}
-              isLastQuestion={currentQuestionIndex === questions.length - 1}
+              isLastQuestion={(currentQuestionIndex + 1) >= (room?.problemCount || questions.length)}
               playerChoices={playerChoices}
             />
           )}

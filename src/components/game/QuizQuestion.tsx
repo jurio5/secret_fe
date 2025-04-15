@@ -151,7 +151,7 @@ export default function QuizQuestion({
       {/* 타이머 종료 후 결과가 표시될 때 자동 이동 안내 메시지 */}
       {showResults && (
         <div className="mt-5 text-center text-gray-400">
-          <p>{isLastQuestion ? '곧 결과 화면으로 이동합니다...' : '곧 다음 문제로 이동합니다...'}</p>
+          <p>{isLastQuestion ? '잠시 후 결과 화면으로 이동합니다...' : '잠시 후 다음 문제로 이동합니다...'}</p>
         </div>
       )}
     </div>
