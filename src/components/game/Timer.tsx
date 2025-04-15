@@ -33,6 +33,7 @@ export default function Timer({ initialTime, onExpire, show }: TimerProps) {
   useEffect(() => {
     // 일시 정지된 경우만 타이머 중지
     if (isPaused) {
+      console.log("타이머가 일시 정지되었습니다.");
       return;
     }
     
@@ -64,10 +65,20 @@ export default function Timer({ initialTime, onExpire, show }: TimerProps) {
     // 새 타이머 설정
     const timerId = setTimeout(() => {
       setTimeLeft(prev => Math.max(0, prev - 1)); // 음수 방지
+      
+      // 남은 시간이 5초 이하일 때 로그 추가
+      if (timeLeft <= 5) {
+        console.log(`타이머: 남은 시간 ${timeLeft}초`);
+      }
     }, 1000);
     
+    timerIdRef.current = timerId;
+    
     return () => {
-      clearTimeout(timerId);
+      if (timerIdRef.current) {
+        clearTimeout(timerIdRef.current);
+        timerIdRef.current = null;
+      }
     };
   }, [timeLeft, isPaused, onExpire]);
   

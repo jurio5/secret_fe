@@ -838,6 +838,11 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       updatePlayerScore(false);
     }
     
+    // 타이머 만료 시 pendingScores 적용
+    setTimeout(() => {
+      applyPendingScores();
+    }, 500);
+    
     // 마지막 문제인지 확인 (정확한 판별)
     const isLastQuestion = checkIsLastQuestion();
     
@@ -964,6 +969,11 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     // 추가: 단일 플레이어 모드에서 바로 결과 표시
     if (playerScores.length === 1) {
       setShowResults(true);
+      
+      // 단일 플레이어 모드에서도 점수를 즉시 반영하지 않고 약간의 딜레이 후 반영
+      setTimeout(() => {
+        applyPendingScores();
+      }, 500);
     }
     
     console.log(`답변 제출 완료: ${answerStr}, 정답 여부: ${isCorrect}, 획득 점수: ${scoreToAdd}, 경과 시간: ${elapsedTime}ms`);
@@ -1317,8 +1327,10 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
           // 결과 표시 상태로 변경
           setShowResults(true);
           
-          // 점수 일괄 적용
-          applyPendingScores();
+          // 이 시점에 모든 플레이어의 점수를 일괄 적용
+          setTimeout(() => {
+            applyPendingScores();
+          }, 500);
           
           // 모든 플레이어가 응답했음을 알림
           publish(`/app/room/${roomId}/scores/sync`, {
@@ -1414,26 +1426,23 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         return;
       }
       
-      // 다른 플레이어의 점수 업데이트
-      setPlayerScores(prev => prev.map(player => {
-        if (player.id === data.playerId) {
-          return {
-            ...player,
-            score: player.score + data.score,
-            lastAnswerCorrect: data.isCorrect
-          };
+      // 변경: 즉시 점수를 업데이트하지 않고 pendingScores에 저장
+      setPendingScores(prev => ({
+        ...prev,
+        [data.playerId]: {
+          score: data.score,
+          isCorrect: data.isCorrect
         }
-        return player;
       }));
       
-      // 다른 플레이어가 정답을 맞췄을 때 토스트 표시
-      if (data.isCorrect && data.score > 0) {
-        const playerName = playerScores.find(p => p.id === data.playerId)?.nickname || "플레이어";
-        toast.success(`${playerName}님이 정답을 맞췄습니다! (+${data.score}점)`, {
-          duration: 2000,
-          icon: '✅'
-        });
-      }
+      // 응답한 플레이어 추가
+      setRespondedPlayers(prev => {
+        const newSet = new Set(prev);
+        newSet.add(data.playerId);
+        return newSet;
+      });
+      
+      // 다른 플레이어가 정답을 맞췄다는 메시지는 표시하지 않음 (모든 플레이어가 동시에 결과를 볼 수 있도록)
     });
     
     // 점수 동기화 구독
@@ -1448,9 +1457,11 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       // 모든 플레이어가 응답했으면 결과 표시
       if (data.allPlayersResponded === true && !showResults) {
         setShowResults(true);
-        toast.success("모든 플레이어가 응답했습니다!", {
-          duration: 1500
-        });
+        
+        // 결과가 표시될 때 점수 일괄 적용
+        setTimeout(() => {
+          applyPendingScores();
+        }, 500);
       }
       
       // 전체 점수 동기화
