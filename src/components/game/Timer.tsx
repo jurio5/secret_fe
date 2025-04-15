@@ -41,8 +41,18 @@ export default function Timer({ initialTime, onExpire, show }: TimerProps) {
       console.log("타이머 만료! onExpire 호출");
       hasExpiredRef.current = true; // 이미 만료됨 표시
       
-      // 함수를 한 번만 확실하게 호출
-      onExpire();
+      // 0으로 고정
+      if (timeLeft < 0) {
+        setTimeLeft(0);
+      }
+      
+      // 함수를 한 번만 확실하게 호출 (setTimeout 사용하지 않음)
+      try {
+        onExpire();
+      } catch (error) {
+        console.error("타이머 만료 처리 오류:", error);
+      }
+      
       return;
     }
     

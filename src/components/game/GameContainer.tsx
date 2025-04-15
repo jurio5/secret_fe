@@ -97,6 +97,10 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   // 플레이어 선택 추적을 위한 상태 추가
   const [playerChoices, setPlayerChoices] = useState<Record<string, { nickname: string; answerId: number; avatarUrl?: string }>>({});
   
+  // 상태 추가 (컴포넌트 상단에 추가)
+  const [questionStartTime, setQuestionStartTime] = useState<number>(Date.now());
+  const maxScorePerQuestion = 100; // 문제당 최대 점수
+  
   // 더미 문제 생성 함수 (훅 아님)
   const createDummyQuestions = () => {
     console.log("더미 문제 데이터 생성");
@@ -477,6 +481,9 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     const questionSubscriptionId = subscribe(`/topic/room/${roomId}/question`, (data) => {
       console.log("문제 변경 이벤트 수신:", data);
       
+      // 문제 시작 시간 기록
+      setQuestionStartTime(Date.now());
+      
       // 문제 데이터를 수신했으므로 타임아웃이 실행되지 않도록 플래그 설정
       setTimeoutExecuted(true);
       
@@ -798,6 +805,12 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   const handleTimerExpired = () => {
     console.log("타이머 만료!");
     
+    // 이미 결과가 표시된 경우 중복 처리 방지
+    if (showResults) {
+      console.log("이미 결과가 표시되어 타이머 만료 처리 무시");
+      return;
+    }
+    
     // 시간 초과 처리
     setAnswerSubmitted(true);
     
@@ -810,6 +823,13 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       playerId: currentUserId,
       answer: -1, // -1은 시간 초과 표시
       isCorrect: false,
+      timestamp: Date.now()
+    });
+    
+    // 중요: 타이머 만료 신호를 모든 플레이어에게 브로드캐스트
+    publish(`/app/room/${roomId}/timer/expired`, {
+      roomId: roomId,
+      questionIndex: currentQuestionIndex,
       timestamp: Date.now()
     });
     
@@ -848,6 +868,9 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     setShowResults(false);
     setRespondedPlayers(new Set()); // 응답 플레이어 초기화 추가
     
+    // 문제 시작 시간 기록
+    setQuestionStartTime(Date.now());
+    
     // 인덱스 업데이트
     setCurrentQuestionIndex(nextIndex);
     
@@ -869,7 +892,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
   
   // 답변 제출 핸들러
   const handleSubmitAnswer = (answerId: string | number) => {
-    if (answerSubmitted) return; // 이미 답변을 제출했으면 무시
+    if (answerSubmitted || !currentQuestion) return; // currentQuestion 확인 추가
     
     console.log(`선택한 답변: ${answerId}`);
     const answerStr = String(answerId);
@@ -880,12 +903,34 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     const correctAnswerIndex = typeof currentQuestion.correctAnswer === 'number'
       ? currentQuestion.correctAnswer
       : currentQuestion.choices.indexOf(currentQuestion.correctAnswer as string);
-      
+    
     // 선택한 답변 인덱스 (0-based)
     const selectedAnswerIndex = currentQuestion.choices.indexOf(answerStr);
     
     // 정답인지 확인
     const isCorrect = selectedAnswerIndex === correctAnswerIndex;
+    
+    // 점수 계산 - 시간에 따른 가중치 적용
+    const elapsedTime = Date.now() - questionStartTime;
+    const questionTime = currentQuestion.timeLimit || 15; // 기본값 15초
+    const timeRatio = 1 - Math.min(Math.max(elapsedTime / (questionTime * 1000), 0), 1);
+    const scoreToAdd = isCorrect ? Math.round(maxScorePerQuestion * timeRatio) : 0;
+    
+    // 응답 플레이어 추가
+    setRespondedPlayers(prev => {
+      const newSet = new Set(prev);
+      newSet.add(currentUserId.toString());
+      return newSet;
+    });
+    
+    // 점수 임시 저장
+    setPendingScores(prev => ({
+      ...prev,
+      [currentUserId.toString()]: {
+        score: scoreToAdd,
+        isCorrect
+      }
+    }));
     
     // 사용자 응답 서버에 전송
     publish(`/app/room/${roomId}/answer`, {
@@ -898,9 +943,6 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       timestamp: Date.now()
     });
     
-    // 플레이어 점수 업데이트
-    updatePlayerScore(isCorrect);
-    
     // 선택 정보 다른 플레이어에게 알림
     publish(`/app/game/${roomId}/player-choice`, {
       playerId: currentUserId.toString(),
@@ -910,12 +952,21 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       timestamp: Date.now()
     });
     
+    // 점수 업데이트 메시지 전송 (새로 추가)
+    publish(`/app/room/${roomId}/scores/update`, {
+      roomId,
+      playerId: currentUserId.toString(),
+      score: scoreToAdd,
+      isCorrect,
+      timestamp: Date.now()
+    });
+    
     // 추가: 단일 플레이어 모드에서 바로 결과 표시
     if (playerScores.length === 1) {
       setShowResults(true);
     }
     
-    console.log("답변 제출 완료, 서버에서 결과 처리 대기 중");
+    console.log(`답변 제출 완료: ${answerStr}, 정답 여부: ${isCorrect}, 획득 점수: ${scoreToAdd}, 경과 시간: ${elapsedTime}ms`);
   };
   
   // 서버에 답변 제출하는 웹소켓 메시지 전송
@@ -1246,7 +1297,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     setPlayerChoices({});
   }, [currentQuestionIndex]);
   
-  // 모든 플레이어 응답 여부를 확인하는 useEffect 추가
+  // 모든 플레이어 응답 여부를 확인하는 useEffect 수정
   useEffect(() => {
     // 플레이어 인원수가 2명 이상이고, 현재 문제가 진행 중일 때만 체크
     if (playerScores.length > 1 && gameStatus === 'IN_PROGRESS' && !showResults) {
@@ -1254,6 +1305,8 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       const respondedCount = respondedPlayers.size;
       // 전체 플레이어 수
       const totalPlayers = playerScores.length;
+      
+      console.log(`응답한 플레이어: ${respondedCount}/${totalPlayers}`);
       
       // 모든 플레이어가 응답했는지 확인
       if (respondedCount >= totalPlayers) {
@@ -1267,12 +1320,25 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
           // 점수 일괄 적용
           applyPendingScores();
           
-          // 마지막 문제인지 확인
-          const totalProblems = room?.problemCount || questions.length || 5;
-          const isLastQuestion = (currentQuestionIndex === (totalProblems - 1)) || 
-                               window.sessionStorage.getItem('isLastQuestion') === 'true';
+          // 모든 플레이어가 응답했음을 알림
+          publish(`/app/room/${roomId}/scores/sync`, {
+            roomId: roomId,
+            playerScores: playerScores,
+            requesterId: currentUserId.toString(),
+            requesterNickname: playerScores.find(p => p.id === currentUserId.toString())?.nickname,
+            allPlayersResponded: true,
+            timestamp: Date.now()
+          });
           
-          console.log(`모든 플레이어 응답 완료: 마지막 문제 여부 = ${isLastQuestion}, 현재 인덱스 = ${currentQuestionIndex}, 총 문제 수 = ${totalProblems}`);
+          // 시스템 메시지 전송
+          publish(`/app/room/chat/${roomId}`, {
+            type: "SYSTEM",
+            content: "모든 플레이어가 답변을 제출했습니다. 결과를 확인하세요!",
+            timestamp: Date.now()
+          });
+          
+          // 마지막 문제인지 확인
+          const isLastQuestion = checkIsLastQuestion();
           
           // 다음 문제로 자동 이동 또는 게임 종료
           setTimeout(() => {
@@ -1287,7 +1353,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         }, 1000);
       }
     }
-  }, [respondedPlayers.size, playerScores.length, gameStatus, showResults]);
+  }, [respondedPlayers.size, playerScores.length, gameStatus, showResults, publish, roomId, currentUserId]);
   
   // 초기화 시 세션 스토리지 클리어
   useEffect(() => {
@@ -1299,6 +1365,114 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       window.sessionStorage.removeItem('isLastQuestion');
     };
   }, []);
+  
+  // 웹소켓 구독 설정 - 타이머 동기화를 위한 useEffect
+  useEffect(() => {
+    // 다른 플레이어의 타이머 만료 구독
+    const timerExpirationSubscriptionId = subscribe(`/topic/room/${roomId}/timer/expired`, (data) => {
+      console.log("다른 플레이어의 타이머 만료 신호 수신:", data);
+      
+      // 자신의 타이머도 이미 만료된 경우 무시
+      if (showResults) {
+        console.log("이미 결과가 표시되어 다른 플레이어의 타이머 만료 신호 무시");
+        return;
+      }
+      
+      // 결과 표시 (강제로)
+      setShowResults(true);
+      setAnswerSubmitted(true);
+      
+      // 마지막 문제인지 확인
+      const isLastQuestion = checkIsLastQuestion();
+      
+      // 3초 후 자동으로 다음 문제로 이동 또는 게임 종료
+      setTimeout(() => {
+        if (isLastQuestion) {
+          console.log("마지막 문제였습니다. 게임을 종료합니다. (동기화)");
+          finishGame();
+        } else {
+          console.log("다음 문제로 자동 이동합니다. (동기화)");
+          moveToNextQuestion();
+        }
+      }, 3000);
+    });
+    
+    // 컴포넌트 언마운트 시 구독 해제
+    return () => {
+      unsubscribe(`/topic/room/${roomId}/timer/expired`);
+    };
+  }, [roomId, subscribe, unsubscribe, showResults, checkIsLastQuestion]);
+  
+  // 점수 동기화를 위한 웹소켓 구독 추가
+  useEffect(() => {
+    // 다른 플레이어의 점수 업데이트 구독
+    const scoreUpdateSubscriptionId = subscribe(`/topic/room/${roomId}/scores/update`, (data) => {
+      console.log("다른 플레이어 점수 업데이트 수신:", data);
+      
+      // 자신의 업데이트는 무시
+      if (data.playerId === currentUserId.toString()) {
+        return;
+      }
+      
+      // 다른 플레이어의 점수 업데이트
+      setPlayerScores(prev => prev.map(player => {
+        if (player.id === data.playerId) {
+          return {
+            ...player,
+            score: player.score + data.score,
+            lastAnswerCorrect: data.isCorrect
+          };
+        }
+        return player;
+      }));
+      
+      // 다른 플레이어가 정답을 맞췄을 때 토스트 표시
+      if (data.isCorrect && data.score > 0) {
+        const playerName = playerScores.find(p => p.id === data.playerId)?.nickname || "플레이어";
+        toast.success(`${playerName}님이 정답을 맞췄습니다! (+${data.score}점)`, {
+          duration: 2000,
+          icon: '✅'
+        });
+      }
+    });
+    
+    // 점수 동기화 구독
+    const scoreSyncSubscriptionId = subscribe(`/topic/room/${roomId}/scores/sync`, (data) => {
+      console.log("점수 동기화 요청 수신:", data);
+      
+      // 자신이 요청한 동기화는 무시
+      if (data.requesterId === currentUserId.toString()) {
+        return;
+      }
+      
+      // 모든 플레이어가 응답했으면 결과 표시
+      if (data.allPlayersResponded === true && !showResults) {
+        setShowResults(true);
+        toast.success("모든 플레이어가 응답했습니다!", {
+          duration: 1500
+        });
+      }
+      
+      // 전체 점수 동기화
+      if (data.playerScores) {
+        setPlayerScores(data.playerScores);
+      }
+    });
+    
+    return () => {
+      unsubscribe(`/topic/room/${roomId}/scores/update`);
+      unsubscribe(`/topic/room/${roomId}/scores/sync`);
+    };
+  }, [roomId, currentUserId, subscribe, unsubscribe, playerScores, showResults]);
+  
+  // useEffect에서 문제 표시 시 시작 시간 기록
+  useEffect(() => {
+    // 게임이 시작되면 문제 시작 시간 설정
+    if (gameStatus === "IN_PROGRESS" && currentQuestion) {
+      setQuestionStartTime(Date.now());
+      console.log("새 문제 시작 시간 기록:", Date.now());
+    }
+  }, [gameStatus, currentQuestion]);
   
   // 게임 대기 화면
   if (gameStatus === "WAITING") {
