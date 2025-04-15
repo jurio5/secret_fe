@@ -2318,12 +2318,12 @@ const initializeWebSocket = async () => {
       
       {/* 채팅 영역 */}
       <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-xl mt-auto">
-        <div className="flex items-center justify-between p-3 border-b border-gray-700">
+        <div className="flex items-center justify-between p-2 border-b border-gray-700">
           <div className="flex items-center">
-            <h3 className="text-white font-medium">로비 채팅</h3>
+            <h3 className="text-white font-medium text-sm">로비 채팅</h3>
             <div className="flex items-center ml-2">
               <div className={`w-2 h-2 rounded-full mr-1 ${isConnected ? 'bg-green-400' : 'bg-gray-400'}`}></div>
-              <span className="text-sm text-gray-300">{activeUsers.length}명 접속 중</span>
+              <span className="text-xs text-gray-300">{activeUsers.length}명 접속 중</span>
             </div>
           </div>
           <button 
@@ -2331,11 +2331,11 @@ const initializeWebSocket = async () => {
             className="bg-gray-700 hover:bg-gray-600 p-1 rounded text-white"
           >
             {showChat ? (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
               </svg>
             )}
@@ -2346,7 +2346,7 @@ const initializeWebSocket = async () => {
           <>
             <div 
               ref={chatContainerRef}
-              className="h-48 overflow-y-auto p-3 space-y-2 bg-gray-900/30"
+              className="h-32 overflow-y-auto p-2 space-y-1 bg-gray-900/30"
             >
               {chatMessages.map((msg, index) => (
                 <div 
@@ -2358,19 +2358,19 @@ const initializeWebSocket = async () => {
                   }`}
                 >
                   {msg.type === "SYSTEM" ? (
-                    <div className="bg-gray-800/70 text-gray-300 text-xs py-1 px-3 rounded-full">
+                    <div className="bg-gray-800/70 text-gray-300 text-xs py-0.5 px-2 rounded-full">
                       {msg.content}
                     </div>
                   ) : (
                     <>
                       {/* 시간 표시 */}
-                      <div className="flex-shrink-0 text-xs text-gray-500 mr-2 mt-1 w-10">
+                      <div className="flex-shrink-0 text-xs text-gray-500 mr-1 mt-1 w-8">
                         {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
                       
                       {/* 발신자 아바타 */}
-                      <div className="flex-shrink-0 mr-2">
-                        <div className="w-6 h-6 rounded-full overflow-hidden bg-gray-800">
+                      <div className="flex-shrink-0 mr-1">
+                        <div className="w-5 h-5 rounded-full overflow-hidden bg-gray-800">
                           {msg.avatarUrl ? (
                             <img 
                               src={msg.avatarUrl} 
@@ -2424,7 +2424,7 @@ const initializeWebSocket = async () => {
               )}
             </div>
             
-            <div className="p-3 border-t border-gray-700">
+            <div className="p-2 border-t border-gray-700">
               <div className="flex items-center">
                 <input
                   type="text"
@@ -2434,19 +2434,19 @@ const initializeWebSocket = async () => {
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
                   placeholder={currentUser ? "메시지를 입력하세요..." : "로그인 후 채팅 가능합니다"}
-                  className="flex-grow bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 text-sm placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="flex-grow bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-gray-200 text-xs placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   disabled={!currentUser}
                 />
                 <button
                   onClick={handleSendChatMessage}
                   disabled={!newChatMessage.trim() || !currentUser}
-                  className={`ml-2 p-2 rounded-lg ${
+                  className={`ml-2 p-1.5 rounded-lg ${
                     newChatMessage.trim() && currentUser
                       ? "bg-blue-600 hover:bg-blue-700"
                       : "bg-gray-700 cursor-not-allowed"
                   }`}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                   </svg>
                 </button>
@@ -2462,7 +2462,7 @@ const initializeWebSocket = async () => {
                   {isConnected && !currentUser && activeUsers.length > 0 && (
                     <button 
                       onClick={() => router.push('/login')}
-                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded transition-colors"
+                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded transition-colors"
                     >
                       로그인 하기
                     </button>
