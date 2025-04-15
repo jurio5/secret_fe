@@ -1990,7 +1990,9 @@ const initializeWebSocket = async () => {
                       </div>
                       <div className="flex items-center justify-between">
                         <div className="text-xs text-gray-400">
-                          {user.status === "online" ? "로비" : user.status}
+                          {user.location === "IN_ROOM" 
+                            ? `게임중 ${user.roomId ? `(${user.roomId}번방)` : ''}` 
+                            : user.status === "online" ? "로비" : user.status}
                         </div>
                         {user.location === "IN_ROOM" && user.roomId && (
                           <button 
