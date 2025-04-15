@@ -1981,6 +1981,67 @@ const initializeWebSocket = async () => {
     };
   }, [currentUser, chatMessages]);
 
+  // 사용자 프로필 캐시 초기화
+  useEffect(() => {
+    // 이미 로그인된 사용자라면 프로필 정보를 재로드
+    if (currentUser?.id) {
+      console.log("현재 사용자 프로필 캐시 상태 확인:", userProfileCache[currentUser.id]);
+      
+      // 이미 캐시에 있는 경우도 '새로고침' 시점에 다시 로드하여 최신 상태 유지
+      const fetchProfileData = async () => {
+        try {
+          const response = await client.GET(`/api/v1/members/{memberId}`, {
+            params: { path: { memberId: currentUser.id } }
+          }) as ApiResponse<UserProfile>;
+          
+          if (response.data?.data) {
+            console.log("사용자 프로필 데이터 리로드 완료:", response.data.data);
+            // 캐시 업데이트
+            userProfileCache[currentUser.id] = {
+              ...response.data.data,
+              lastUpdated: Date.now()
+            };
+            
+            // 현재 사용자 상태도 업데이트 - 중요한 필드만
+            setCurrentUser(prevUser => {
+              if (!prevUser) return prevUser;
+              return {
+                ...prevUser,
+                avatarUrl: response.data?.data.avatarUrl || prevUser.avatarUrl
+              };
+            });
+            
+            // 로컬 스토리지에 프로필 캐시 저장
+            try {
+              localStorage.setItem('userProfileCache', JSON.stringify(userProfileCache));
+            } catch (e) {
+              console.error("프로필 캐시 저장 실패:", e);
+            }
+          }
+        } catch (error) {
+          console.error("프로필 데이터 새로고침 실패:", error);
+        }
+      };
+      
+      fetchProfileData();
+    }
+  }, [currentUser?.id]);
+
+  // 첫 로딩 시 로컬 스토리지에서 캐시 복원
+  useEffect(() => {
+    try {
+      const cachedData = localStorage.getItem('userProfileCache');
+      if (cachedData) {
+        const parsed = JSON.parse(cachedData);
+        // 전역 변수에 할당
+        Object.assign(userProfileCache, parsed);
+        console.log("로컬 스토리지에서 프로필 캐시 복원:", userProfileCache);
+      }
+    } catch (e) {
+      console.error("캐시 복원 실패:", e);
+    }
+  }, []);
+
   return (
     <div className="container mx-auto px-4 py-8 flex flex-col h-full">
       {/* 토스트 메시지 표시 */}
