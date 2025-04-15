@@ -432,9 +432,73 @@ export default function RoomPage() {
           return;
         }
         
-        // 채팅 메시지 처리
-        setChatMessages((prevMessages) => {
-          const newMessage = {
+        // 처리할 메시지 객체 초기화
+        let processedMessage;
+        
+        // 메시지 타입에 따른 처리
+        if (typeof message === 'string') {
+          // 일반 텍스트 메시지인 경우 (로비와 동일하게 처리)
+          console.log("일반 텍스트 채팅 메시지 수신:", message);
+          
+          // 따옴표 제거
+          let content = message;
+          if (content.startsWith('"') && content.endsWith('"')) {
+            content = content.substring(1, content.length - 1);
+          }
+          
+          // 시스템 메시지인지 확인 (입장/퇴장 메시지)
+          const isSystemMessage = 
+            content.includes("님이 입장했습니다") || 
+            content.includes("님이 퇴장했습니다") ||
+            content.includes("님이 준비 완료") ||
+            content.includes("님이 준비 취소") ||
+            content.includes("채팅에 연결되었습니다") ||
+            content.includes("문제 생성");
+          
+          if (isSystemMessage) {
+            // 시스템 메시지
+            processedMessage = {
+              type: "SYSTEM",
+              content: content,
+              senderId: "system",
+              senderName: "System",
+              timestamp: Date.now(),
+              roomId: roomId
+            };
+          } else {
+            // 일반 채팅 메시지
+            // 보낸 사용자가 현재 사용자가 아니면 다른 플레이어들 중에서 찾기
+            if (currentUser && message !== newChatMessage.trim()) {
+              // 다른 플레이어가 보낸 메시지
+              // players 배열에서 가장 최근에 활동한 플레이어를 찾아 그 사용자를 발신자로 설정
+              // (정확한 발신자를 알 수 없으므로 휴리스틱 사용)
+              const sender = players.find(p => p.id !== currentUser.id.toString());
+              
+              processedMessage = {
+                type: "CHAT",
+                content: content,
+                senderId: sender?.id || "unknown",
+                senderName: sender?.nickname || "사용자",
+                avatarUrl: sender?.avatarUrl || DEFAULT_AVATAR,
+                timestamp: Date.now(),
+                roomId: roomId
+              };
+            } else {
+              // 현재 사용자가 보낸 메시지
+              processedMessage = {
+                type: "CHAT",
+                content: content,
+                senderId: currentUser?.id || "unknown",
+                senderName: currentUser?.nickname || "사용자",
+                avatarUrl: currentUser?.avatarUrl || DEFAULT_AVATAR,
+                timestamp: Date.now(),
+                roomId: roomId
+              };
+            }
+          }
+        } else {
+          // JSON 객체 형태의 메시지인 경우
+          processedMessage = {
             type: message.type || "CHAT",
             content: message.content || "내용 없음",
             senderId: message.senderId || "unknown",
@@ -443,8 +507,11 @@ export default function RoomPage() {
             timestamp: message.timestamp || Date.now(),
             roomId: message.roomId || roomId
           };
-          
-          return [...prevMessages, newMessage];
+        }
+        
+        // 채팅 메시지 추가
+        setChatMessages((prevMessages) => {
+          return [...prevMessages, processedMessage];
         });
       } catch (error) {
         console.error("채팅 메시지 처리 중 오류:", error, "원본 메시지:", message);
@@ -742,12 +809,8 @@ export default function RoomPage() {
             roomId: parseInt(roomId)
           });
           
-          // 방 입장 시스템 메시지
-          publish(`/app/room/chat/${roomId}`, {
-            type: "SYSTEM",
-            content: `${userData.nickname}님이 입장했습니다.`,
-            timestamp: Date.now()
-          });
+          // 방 입장 시스템 메시지 - 일반 텍스트로 변경
+          publish(`/app/room/chat/${roomId}`, `!SYSTEM ${userData.nickname}님이 입장했습니다.`);
           
           // 로비에 사용자 상태 업데이트 전송
           publish(`/app/lobby/status`, {
@@ -911,15 +974,8 @@ export default function RoomPage() {
   const handleSendChatMessage = () => {
     if (!newChatMessage.trim() || !currentUser) return;
     
-    // 채팅 메시지 발행
-    publish(`/app/room/chat/${roomId}`, {
-      type: "CHAT",
-      content: newChatMessage,
-      senderId: currentUser.id,
-      senderName: currentUser.nickname,
-      timestamp: Date.now(),
-      roomId: roomId
-    });
+    // 채팅 메시지 발행 - JSON 객체 대신 일반 텍스트로 변경
+    publish(`/app/room/chat/${roomId}`, newChatMessage.trim());
     
     setNewChatMessage("");
   };
@@ -959,12 +1015,8 @@ export default function RoomPage() {
         body: { isReady: newReadyState }
       });
       
-      // 메시지 발행 - 방 내 플레이어에게 알림
-      publish(`/app/room/chat/${roomId}`, {
-        type: "SYSTEM",
-        content: `${currentUser.nickname || '플레이어'}님이 ${newReadyState ? '준비 완료' : '준비 취소'}하였습니다.`,
-        timestamp: Date.now()
-      });
+      // 메시지 발행 - 방 내 플레이어에게 알림 (일반 텍스트로 변경)
+      publish(`/app/room/chat/${roomId}`, `!SYSTEM ${currentUser.nickname || '플레이어'}님이 ${newReadyState ? '준비 완료' : '준비 취소'}하였습니다.`);
       
       // 로컬 상태 업데이트 및 브로드캐스트
       setIsReady(newReadyState);
@@ -1018,12 +1070,8 @@ export default function RoomPage() {
         return;
       }
       
-      // 문제 생성 중임을 알리는 시스템 메시지
-      publish(`/app/room/chat/${roomId}`, {
-        type: "SYSTEM",
-        content: "AI가 문제를 생성하는 중입니다. 잠시만 기다려주세요...",
-        timestamp: Date.now()
-      });
+      // 문제 생성 중임을 알리는 시스템 메시지 (일반 텍스트로 변경)
+      publish(`/app/room/chat/${roomId}`, `AI가 문제를 생성하는 중입니다. 잠시만 기다려주세요...`);
       
       // WebSocket을 통해 AI 퀴즈 생성 요청 전송
       publish(`/app/room/${roomId}/quiz/generate`, {
@@ -1140,12 +1188,8 @@ export default function RoomPage() {
     try {
       if(!currentUser || !room) return;
       
-      // 퇴장 시스템 메시지 먼저 전송
-      publish(`/app/room/chat/${roomId}`, {
-        type: "SYSTEM",
-        content: `${currentUser.nickname}님이 퇴장했습니다.`,
-        timestamp: Date.now()
-      });
+      // 퇴장 시스템 메시지 먼저 전송 - 일반 텍스트로 변경
+      publish(`/app/room/chat/${roomId}`, `!SYSTEM ${currentUser.nickname}님이 퇴장했습니다.`);
       
       // 퇴장 메시지 전송
       publish(`/app/room/${roomId}/leave`, {
@@ -1469,17 +1513,24 @@ export default function RoomPage() {
                       className="flex-grow space-y-3 overflow-y-auto max-h-[calc(100vh-400px)] pr-1 mb-4"
                     >
                       {chatMessages.map((msg, index) => (
-                        <div key={index} className={`flex ${msg.type === 'SYSTEM' ? 'justify-center' : 'items-start'}`}>
+                        <div key={index} className={`${msg.type === 'SYSTEM' ? 'flex justify-center' : 'flex items-start'}`}>
                           {msg.type === 'SYSTEM' ? (
                             <div className="bg-gray-700/40 text-gray-300 px-3 py-1.5 rounded-md text-sm text-center max-w-[80%]">
                               {msg.content}
                             </div>
                           ) : (
                             <>
-                              <img src={msg.avatarUrl || DEFAULT_AVATAR} alt={msg.sender} className="w-8 h-8 rounded-full mr-2 mt-1" />
-                              <div className={`max-w-[70%] ${msg.sender === currentUser?.nickname ? 'bg-blue-600/40 text-blue-100' : 'bg-gray-700/60 text-white'} px-3 py-2 rounded-lg`}>
+                              <img 
+                                src={msg.avatarUrl || DEFAULT_AVATAR} 
+                                alt={msg.senderName} 
+                                className="w-8 h-8 rounded-full mr-2 mt-1" 
+                                onError={(e) => { 
+                                  (e.target as HTMLImageElement).src = DEFAULT_AVATAR; 
+                                }}
+                              />
+                              <div className={`max-w-[70%] ${msg.senderId === String(currentUser?.id) ? 'bg-blue-600/40 text-blue-100' : 'bg-gray-700/60 text-white'} px-3 py-2 rounded-lg`}>
                                 <div className="text-xs text-gray-300 mb-1 flex justify-between">
-                                  <span>{msg.sender}</span>
+                                  <span>{msg.senderName}</span>
                                   <span className="ml-4 opacity-70">
                                     {new Date(msg.timestamp).toLocaleTimeString('ko-KR', {
                                       hour: '2-digit',

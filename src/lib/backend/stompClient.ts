@@ -290,13 +290,37 @@ const unsubscribe = (destination: string) => {
   }
 };
 
-// 실제 발행을 수행하는 내부 함수
-const performPublish = (destination: string, body: any) => {
-  console.log(`[PUBLISH] 메시지 발행: ${destination}`, typeof body === 'string' ? body : '(객체)');
-  stompClient.publish({
-    destination,
-    body: JSON.stringify(body),
-  });
+// 실제 STOMP 메시지 발행 함수
+const performPublish = async (destination: string, body: any) => {
+  if (!stompClient || !isConnected) {
+    console.error("STOMP 클라이언트가 연결되지 않았습니다.");
+    return false;
+  }
+
+  try {
+    // 채팅 메시지의 경우 문자열로 직접 전송
+    const isChatMessage = destination === "/app/lobby/chat" || 
+                         (destination.includes("/app/room/") && destination.includes("/chat"));
+    
+    if (isChatMessage && typeof body === 'string') {
+      console.log(`[STOMP] 메시지 발행: ${destination}, 본문 타입(문자열): ${body}`);
+      stompClient.publish({
+        destination,
+        body: body,  // 직접 문자열 전송
+      });
+    } else {
+      console.log(`[STOMP] 메시지 발행: ${destination}, 본문 타입(객체): ${typeof body === 'object' ? JSON.stringify(body) : body}`);
+      stompClient.publish({
+        destination,
+        body: typeof body === 'string' ? body : JSON.stringify(body),
+      });
+    }
+    
+    return true;
+  } catch (error) {
+    console.error(`[STOMP] 메시지 발행 오류: ${destination}`, error);
+    return false;
+  }
 };
 
 // 발행 함수
@@ -451,12 +475,30 @@ export const safeSubscribe = async (
       try {
         // JSON 파싱 시도
         const parsedMessage = JSON.parse(message.body);
+        
+        // 채팅 메시지인 경우 따옴표 처리
+        if (destination.includes('/chat') && parsedMessage && parsedMessage.content) {
+          if (typeof parsedMessage.content === 'string' && 
+              parsedMessage.content.startsWith('"') && 
+              parsedMessage.content.endsWith('"')) {
+            parsedMessage.content = parsedMessage.content.substring(1, parsedMessage.content.length - 1);
+            console.log('[CHAT] 메시지 따옴표 제거:', parsedMessage.content);
+          }
+        }
+        
         callback(parsedMessage);
       } catch (error) {
         // JSON 파싱 실패 시 기존 처리 로직 활용
         if (message.body.includes("WebSocketChatMessageResponse[")) {
           const javaObject = parseJavaObjectString(message.body);
           if (javaObject) {
+            // 채팅 메시지인 경우 따옴표 처리 추가
+            if (javaObject.content && typeof javaObject.content === 'string') {
+              if (javaObject.content.startsWith('"') && javaObject.content.endsWith('"')) {
+                javaObject.content = javaObject.content.substring(1, javaObject.content.length - 1);
+                console.log('[CHAT] Java 객체 메시지 따옴표 제거:', javaObject.content);
+              }
+            }
             callback(javaObject);
             return;
           }
@@ -480,9 +522,16 @@ export const safeSubscribe = async (
               ? destination.split('/chat/')[1] 
               : destination.split('/').pop() || "unknown";
             
+            // 따옴표 제거 처리 추가
+            let content = message.body;
+            if (typeof content === 'string' && content.startsWith('"') && content.endsWith('"')) {
+              content = content.substring(1, content.length - 1);
+              console.log('[CHAT] 원본 메시지 따옴표 제거:', content);
+            }
+            
             callback({
               type: "CHAT",
-              content: message.body,
+              content: content,
               senderId: "system",
               senderName: "System",
               timestamp: Date.now(),
@@ -546,10 +595,23 @@ export const safePublish = async (destination: string, body: any): Promise<boole
   
   // 연결됐을 때 발행 시도
   try {
-    stompClient.publish({
-      destination,
-      body: JSON.stringify(body),
-    });
+    // 채팅 메시지 처리를 특별히 처리 - 채팅의 경우 문자열 그대로 전송
+    if (destination === "/app/lobby/chat" || destination.includes("/app/room/") && destination.includes("/chat")) {
+      // 채팅 메시지는 이미 문자열이므로 직접 전송
+      console.log(`[SAFE-PUBLISH] 채팅 메시지 직접 전송: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
+      stompClient.publish({
+        destination,
+        body: typeof body === 'string' ? body : JSON.stringify(body),
+      });
+    } else {
+      // 일반 메시지는 JSON으로 변환하여 전송
+      console.log(`[SAFE-PUBLISH] 일반 메시지 JSON 변환 후 전송`);
+      stompClient.publish({
+        destination,
+        body: JSON.stringify(body),
+      });
+    }
+    
     console.log(`[SAFE-PUBLISH] ${destination} 발행 성공`);
     return true;
   } catch (error) {
