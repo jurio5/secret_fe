@@ -1247,10 +1247,10 @@ export default function RoomPage() {
         return;
       }
       
-      // 쿨다운 타이머 처리 - 마지막 시작 시도 후 3초 이내에는 다시 시도 불가
+      // 쿨다운 타이머 처리 - 마지막 시작 시도 후 5초 이내에는 다시 시도 불가
       const lastStartTime = parseInt(sessionStorage.getItem('lastGameStartTime') || '0');
       const currentTime = Date.now();
-      const cooldownTime = 3000; // 3초 쿨다운
+      const cooldownTime = 5000; // 5초 쿨다운
       
       // 쿨다운 시간이 지나지 않았으면 리턴
       if (currentTime - lastStartTime < cooldownTime) {
@@ -1297,18 +1297,8 @@ export default function RoomPage() {
         subscribe(`/topic/room/${roomId}/quiz/generation`, (data) => {
           console.log("퀴즈 생성 상태 업데이트:", data);
           
-          // 메시지 내용 계산 (실제 메시지 또는 기본 메시지)
-          const messageContent = data.message || "문제 생성이 진행 중입니다...";
-          
-          // 이 메시지를 이전에 보낸 적이 없는 경우에만 메시지 전송
-          if (!sentMessages.has(messageContent)) {
-            // 메시지 전송
-            publish(`/app/room/chat/${roomId}`, `!SYSTEM ${messageContent}`);
-            // 전송 기록
-            sentMessages.add(messageContent);
-          }
-          
-          // 게임 완료 상태일 때 완료 메시지 전송 (항상 한 번만 전송)
+          // 메시지가 방 인원 수만큼 중복 출력되는 문제를 해결하기 위해 메시지 출력하지 않음
+          // 생성 완료 메시지만 표시
           if (data.status === "COMPLETED" && !sentMessages.has("문제 생성 완료!")) {
             publish(`/app/room/chat/${roomId}`, `!SYSTEM 문제 생성 완료! 3초 후 게임이 시작됩니다.`);
             sentMessages.add("문제 생성 완료!");
@@ -1733,7 +1723,7 @@ export default function RoomPage() {
     const checkCooldown = () => {
       const lastStartTime = parseInt(sessionStorage.getItem('lastGameStartTime') || '0');
       const currentTime = Date.now();
-      const cooldownTime = 3000; // 3초 (startGame 함수와 동일하게 유지)
+      const cooldownTime = 5000; // 3초 (startGame 함수와 동일하게 유지)
       const remainingTime = Math.max(0, cooldownTime - (currentTime - lastStartTime));
       
       if (remainingTime > 0) {
@@ -1820,41 +1810,6 @@ export default function RoomPage() {
     <AppLayout showBeforeUnloadWarning={false} showHeader={false}>
       <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 py-6">
         <div className="max-w-[1400px] mx-auto px-4 py-4 h-[calc(100vh-2rem)] flex flex-col">
-          {/* 상단 헤더 - 더 간소화하고 세련되게 */}
-          <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-5 mb-5">
-            <div className="flex flex-wrap md:flex-nowrap justify-between items-center">
-              <div className="flex items-center space-x-4 w-full md:w-auto mb-3 md:mb-0">
-                <h1 className="text-2xl md:text-3xl font-bold text-white flex items-center">
-                  {room?.title}
-                  <span className="ml-3 px-2.5 py-1 text-xs bg-indigo-600/50 text-indigo-200 rounded-md">
-                    #{roomId}
-                  </span>
-                </h1>
-                <div className="text-sm text-gray-400 flex flex-wrap gap-x-5 mt-1">
-                  <span className="flex items-center">
-                    <FaCrown className="mr-1.5 text-yellow-500" />
-                    {room?.ownerNickname}
-                  </span>
-                  <span className="flex items-center">
-                    <FaUsers className="mr-1.5" />
-                    {players.length}/{room?.capacity}명
-                  </span>
-                  <span className="flex items-center">
-                    <FaInfoCircle className="mr-1.5" />
-                    {gameStatus === 'IN_GAME' || room?.status === 'IN_GAME' ? '게임중' : '대기중'}
-                  </span>
-                </div>
-              </div>
-              <button
-                className="px-4 py-2.5 bg-red-600/80 text-white rounded-xl hover:bg-red-700 transition flex items-center shadow-md"
-                onClick={leaveRoom}
-              >
-                <FaDoorOpen className="mr-2" />
-                나가기
-              </button>
-            </div>
-          </div>
-          
           {/* 방 상세 정보 */}
           <div className="bg-gray-800/40 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-lg p-5 mb-5">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1908,6 +1863,7 @@ export default function RoomPage() {
                 publish={publish}
                 subscribe={subscribe}
                 unsubscribe={unsubscribe}
+                leaveRoom={leaveRoom}
               />
             </div>
           ) : (
@@ -2070,7 +2026,7 @@ export default function RoomPage() {
               </div>
               
               {/* 하단 버튼 영역 */}
-              <div className="mt-5 flex justify-center">
+              <div className="mt-5 flex justify-center gap-4">
                 {isOwner ? (
                   // 방장이면 시작 버튼
                   <button
@@ -2127,6 +2083,15 @@ export default function RoomPage() {
                     )}
                   </button>
                 )}
+                
+                {/* 나가기 버튼 추가 */}
+                <button
+                  className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-medium transition-all shadow-md flex items-center"
+                  onClick={leaveRoom}
+                >
+                  <FaDoorOpen className="mr-2" />
+                  나가기
+                </button>
               </div>
             </>
           )}

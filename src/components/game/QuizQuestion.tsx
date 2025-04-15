@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { FaUser } from 'react-icons/fa';
+import { FaUser, FaClock } from 'react-icons/fa';
+import Timer from './Timer';
 
 interface QuizQuestionProps {
   question: {
@@ -18,6 +19,10 @@ interface QuizQuestionProps {
   onNext: () => void;
   isLastQuestion: boolean;
   playerChoices?: Record<string, { nickname: string, answerId: number, avatarUrl?: string }>;
+  currentQuestionIndex?: number;
+  totalQuestions?: number;
+  timeLeft?: number;
+  onTimerExpire?: () => void;
 }
 
 export default function QuizQuestion({
@@ -28,7 +33,11 @@ export default function QuizQuestion({
   answerSubmitted,
   onNext,
   isLastQuestion,
-  playerChoices = {}
+  playerChoices = {},
+  currentQuestionIndex = 0,
+  totalQuestions = 1,
+  timeLeft = 0,
+  onTimerExpire = () => {}
 }: QuizQuestionProps) {
   // 정답 인덱스
   const correctAnswerIndex = typeof question.correctAnswer === 'number' 

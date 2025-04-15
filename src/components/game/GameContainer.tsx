@@ -6,7 +6,7 @@ import client from "@/lib/backend/client";
 import QuizQuestion from "./QuizQuestion";
 import Timer from "./Timer";
 import PlayerScores from "./PlayerScores";
-import { FaFlag, FaClock } from "react-icons/fa";
+import { FaFlag, FaClock, FaDoorOpen, FaHome } from "react-icons/fa";
 import { RoomResponse } from "@/lib/types/room";
 import toast from 'react-hot-toast';
 
@@ -45,9 +45,10 @@ interface GameContainerProps {
   publish: (destination: string, body: any) => void;
   subscribe: (destination: string, callback: (message: any) => void) => void;
   unsubscribe: (destination: string) => void;
+  leaveRoom?: () => void; // 나가기 기능 추가
 }
 
-export default function GameContainer({ roomId, currentUserId, players, room, onGameEnd, publish, subscribe, unsubscribe }: GameContainerProps) {
+export default function GameContainer({ roomId, currentUserId, players, room, onGameEnd, publish, subscribe, unsubscribe, leaveRoom }: GameContainerProps) {
   // 게임 상태 관리
   const [gameStatus, setGameStatus] = useState<GameStatus>("WAITING");
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
@@ -1609,7 +1610,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         {/* 승자 표시 */}
         {playerScores.length > 0 && (
           <div className="mb-8 text-center">
-            <div className="text-lg text-gray-300 mb-2">승자</div>
+            <div className="text-lg text-gray-300 mb-2">솔로몬</div>
             <div className="inline-block bg-gradient-to-r from-indigo-600 to-blue-600 p-1 rounded-xl">
               <div className="bg-gray-900 rounded-lg p-4">
                 <div className="flex items-center justify-center mb-2">
@@ -1633,7 +1634,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         {/* 순위표 */}
         <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
           <h3 className="text-lg font-semibold text-white mb-4">점수 순위</h3>
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
             {playerScores
               .sort((a, b) => b.score - a.score)
               .map((player, index) => (
@@ -1654,7 +1655,7 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
                   <div className="flex-grow">
                     <div className="font-medium text-white">{player.nickname}</div>
                   </div>
-                  <div className="text-xl font-bold text-blue-400">{player.score}</div>
+                  <div className="text-xl font-bold text-blue-400">{player.score} 점</div>
                 </div>
               ))}
           </div>
@@ -1663,10 +1664,11 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
         {/* 다시 하기 버튼 (방장만 표시) */}
         <div className="mt-6 flex justify-center">
           <button 
-            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-3 rounded-xl font-medium shadow-lg"
-            onClick={handleRestartGame}
+            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-3 rounded-xl font-medium shadow-lg flex items-center gap-2 transition-all hover:scale-105"
+            onClick={() => window.location.reload()}
           >
-            새 게임 시작
+            <FaHome className="text-lg" />
+            대기실로 돌아가기
           </button>
         </div>
       </div>
@@ -1713,6 +1715,10 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
               onNext={moveToNextQuestion}
               isLastQuestion={(currentQuestionIndex + 1) >= (room?.problemCount || questions.length)}
               playerChoices={playerChoices}
+              currentQuestionIndex={currentQuestionIndex}
+              totalQuestions={room?.problemCount || questions.filter(q => q !== null).length || 1}
+              timeLeft={timeLeft}
+              onTimerExpire={handleTimerExpired}
             />
           )}
         </div>
