@@ -1338,7 +1338,7 @@ export default function RoomPage() {
                   </span>
                   <span className="flex items-center">
                     <FaUsers className="mr-1.5" />
-                    {room?.currentPlayers}/{room?.capacity}명
+                    {players.length}/{room?.capacity}명
                   </span>
                   <span className="flex items-center">
                     <FaInfoCircle className="mr-1.5" />
