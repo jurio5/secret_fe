@@ -82,6 +82,7 @@ interface PlayerProfile {
 export default function RoomPage() {
   const params = useParams();
   const roomId = params.id as string;
+  const router = useRouter();
   const [room, setRoom] = useState<RoomResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -1545,7 +1546,7 @@ export default function RoomPage() {
       // API 호출 및 리다이렉트 (브로드캐스트 메시지가 전송될 시간 확보)
       setTimeout(async () => {
         try {
-          await (client.POST as any)(`/api/v1/rooms/${roomId}/leave`, {});
+          await (client.POST as any)(`/api/v1/rooms/${roomId}/leave-with-id`, {});
           // 로비로 리다이렉트
           window.location.href = "/lobby";
         } catch (error) {
@@ -1587,6 +1588,105 @@ export default function RoomPage() {
         console.log("WebSocket 구독 해제 완료");
       } catch (e) {
         console.error("WebSocket 구독 해제 중 오류 발생:", e);
+      }
+    };
+  }, [roomId]);
+
+  // 브라우저 탭 닫기/새로고침/페이지 이동 시 방 퇴장 처리
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      // 사용자가 방에 있는 경우에만 퇴장 메시지 전송
+      if (currentUserId && room?.id) {
+        // 동기적으로 방 퇴장 메시지 전송
+        console.log("페이지 이탈 감지, 방 퇴장 메시지 전송");
+        
+        // 서버에 방 퇴장 메시지 전송 (비동기 요청을 동기적으로 처리)
+        const leaveMessage = JSON.stringify({
+          type: "LEAVE",
+          playerId: currentUserId,
+          playerName: currentUser?.nickname || "알 수 없음",
+          timestamp: Date.now()
+        });
+
+        // 네비게이트 비콘 API를 사용하여 페이지를 떠날 때도 요청이 전송되도록 함
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(
+            `${process.env.NEXT_PUBLIC_WAS_HOST}/api/v1/rooms/${room.id}/leave-with-id?userId=${currentUserId}`,
+            new Blob([leaveMessage], { type: 'application/json' })
+          );
+        } else {
+          // sendBeacon을 지원하지 않는 브라우저를 위한 대체 방법
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', `${process.env.NEXT_PUBLIC_WAS_HOST}/api/v1/rooms/${room.id}/leave-with-id?userId=${currentUserId}`, false); // 동기 요청
+          xhr.setRequestHeader('Content-Type', 'application/json');
+          xhr.send(leaveMessage);
+        }
+      }
+    };
+
+    // 이벤트 리스너 등록
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    // 컴포넌트 언마운트 시 이벤트 리스너 제거
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [currentUserId, currentUser, room]);
+
+  // 페이지 이동 감지 및 방 퇴장 처리
+  useEffect(() => {
+    let isLeaving = false;
+
+    // 방 입장 시 상태 초기화
+    const initRoom = async () => {
+      try {
+        const userData = await fetchCurrentUser();
+        if (userData) {
+          await fetchRoomData();
+          console.log("방 입장 처리 완료");
+        }
+      } catch (error) {
+        console.error("방 입장 초기화 중 오류:", error);
+      }
+    };
+
+    initRoom();
+
+    // 컴포넌트 언마운트 시 방 퇴장 처리
+    return () => {
+      if (isLeaving) return; // 이미 퇴장 처리 중이면 중복 실행 방지
+      isLeaving = true;
+
+      if (currentUserId && roomId) {
+        console.log("컴포넌트 언마운트, 방 퇴장 처리");
+        
+        try {
+          // 방 퇴장 메시지 전송
+          const leaveMessage = JSON.stringify({
+            type: "LEAVE",
+            playerId: currentUserId,
+            playerName: currentUser?.nickname || "알 수 없음",
+            timestamp: Date.now()
+          });
+          
+          // stompClient를 통해 퇴장 메시지 발행 (동기식으로 처리하기 위한 시도)
+          publish(`/app/room/${roomId}/leave`, leaveMessage);
+          
+          // 직접 API 호출로 방 나가기 요청
+          fetch(`${process.env.NEXT_PUBLIC_WAS_HOST}/api/v1/rooms/${roomId}/leave-with-id?userId=${currentUserId}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: leaveMessage,
+            // 가능한 한 요청이 완료될 때까지 기다리도록 함
+            keepalive: true
+          }).catch(e => console.error("방 퇴장 API 호출 실패:", e));
+          
+          console.log("방 퇴장 메시지 전송 완료");
+        } catch (error) {
+          console.error("방 퇴장 처리 중 오류:", error);
+        }
       }
     };
   }, [roomId]);
