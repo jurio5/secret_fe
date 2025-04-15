@@ -2135,7 +2135,7 @@ const initializeWebSocket = async () => {
               </button>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[45vh] overflow-y-auto pr-2">
               {rooms.length > 0 ? (
                 rooms.map((room) => (
                   <div 
@@ -2258,7 +2258,7 @@ const initializeWebSocket = async () => {
                         </div>
                         </div>
             
-            <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
+            <div className="space-y-2 max-h-[20vh] overflow-y-auto pr-2">
               {activeUsers.length > 0 ? (
                 activeUsers.map((user) => (
                   <div 
