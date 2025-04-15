@@ -1391,7 +1391,8 @@ function LobbyContent({
         // 개별 방 정보 업데이트
         try {
           // 상태 변경이 있으면 즉시 반영 (게임 시작)
-          if (hasStatusUpdate) {
+          if (hasStatusUpdate && newStatus) {
+            console.log(`방 ${roomId} 상태 즉시 변경 시도: ${newStatus}`);
             setRooms(prevRooms => {
               return prevRooms.map(room => {
                 if (room.id === parseInt(roomId)) {
@@ -1405,10 +1406,16 @@ function LobbyContent({
           
           // 백엔드에서 최신 정보 가져오기
           fetch(`/api/v1/rooms/${roomId}`)
-            .then(res => res.json())
+            .then(res => {
+              if (!res.ok) {
+                throw new Error(`방 정보 요청 실패: ${res.status}`);
+              }
+              return res.json();
+            })
             .then(data => {
               if (data && data.data) {
                 const updatedRoom = data.data;
+                console.log(`방 ${roomId} 정보 수신:`, updatedRoom);
                 
                 setRooms(prevRooms => {
                   // 기존 목록에 있는지 확인
@@ -1416,11 +1423,15 @@ function LobbyContent({
                   
                   if (roomExists) {
                     // 기존 방 정보 업데이트
-                    const updated = prevRooms.map(room => 
-                      room.id === parseInt(roomId) ? { ...room, ...updatedRoom } : room
-                    );
+                    const updatedRooms = prevRooms.map(room => {
+                      if (room.id === parseInt(roomId)) {
+                        console.log(`방 ${roomId} 상태 업데이트: ${room.status} -> ${updatedRoom.status}`);
+                        return { ...room, ...updatedRoom };
+                      }
+                      return room;
+                    });
                     console.log(`방 ID ${roomId} 정보 업데이트됨:`, updatedRoom);
-                    return updated;
+                    return updatedRooms;
                   } else {
                     // 새 방 추가
                     console.log(`새 방 정보 추가됨: ID ${roomId}`, updatedRoom);
