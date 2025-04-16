@@ -11,6 +11,8 @@ import { useRouter } from "next/navigation";
 import FriendModal from '@/components/friend/FriendModal';
 import RankingModal from '@/components/ranking/RankingModal';
 import { updateOnlineUserIds } from '@/components/friend/friendApi';
+import ShopModal from '@/components/shop/ShopModal';
+import { DEFAULT_AVATAR } from '@/lib/constants';
 
 interface User {
   id: number;
@@ -78,7 +80,7 @@ const userProfileCache: Record<number, UserProfile> = {};
 let lobbyMessageCache: any[] = [];
 
 // 기본 아바타 URL
-const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';
+// const DEFAULT_AVATAR = 'https://quizzle-avatars.s3.ap-northeast-2.amazonaws.com/%EA%B8%B0%EB%B3%B8+%EC%95%84%EB%B0%94%ED%83%80.png';
 
 // 랭킹 정보 타입 정의
 // interface MemberRanking {
@@ -130,6 +132,8 @@ function LobbyContent({
   // 방 생성 관련 상태 추가
   const [isCreatingRoom, setIsCreatingRoom] = useState<boolean>(false);
   const [roomCreateError, setRoomCreateError] = useState<string>("");
+  // 상점 모달 상태 추가
+  const [showShopModal, setShowShopModal] = useState<boolean>(false);
   
   // 비밀번호 입력 모달 상태 추가
   const [showPasswordModal, setShowPasswordModal] = useState<boolean>(false);
@@ -2042,6 +2046,103 @@ const initializeWebSocket = async () => {
     }
   }, []);
 
+  // 상점 모달 토글 함수 추가
+  const toggleShopModal = () => {
+    setShowShopModal(!showShopModal);
+  };
+
+  // 아바타 구매 완료 후 호출될 함수 추가
+  const handleAvatarPurchased = async () => {
+    try {
+      // 즉시 캐시 무효화를 위한 헤더 추가
+      const customHeaders = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Request-Time": Date.now().toString()
+      };
+      
+      // 1. 현재 사용자 정보 다시 불러오기 (이미지 URL 갱신)
+      const userResponse = await client.GET("/api/v1/members/me", {
+        headers: customHeaders
+      }) as ApiResponse<User>;
+      
+      if (userResponse.data?.data) {
+        const userData = userResponse.data.data;
+        
+        // 현재 사용자 상태 업데이트
+        setCurrentUser(userData);
+        
+        // 프로필 캐시 강제 업데이트
+        if (userData.id) {
+          // 프로필 데이터 가져오기
+          const profileResponse = await client.GET(`/api/v1/members/{memberId}`, {
+            params: { path: { memberId: userData.id } },
+            headers: customHeaders
+          }) as ApiResponse<UserProfile>;
+          
+          if (profileResponse.data?.data) {
+            // 캐시 최신 데이터로 업데이트
+            userProfileCache[userData.id] = {
+              ...profileResponse.data.data,
+              lastUpdated: Date.now()
+            };
+            
+            // 로컬 스토리지 캐시 업데이트
+            try {
+              localStorage.setItem('userProfileCache', JSON.stringify(userProfileCache));
+            } catch (e) {
+              console.error("프로필 캐시 저장 실패:", e);
+            }
+            
+            // activeUsers 목록에서도 현재 사용자 아바타 업데이트
+            setActiveUsers(prev => {
+              return prev.map(user => {
+                if (user.id === userData.id) {
+                  return {
+                    ...user,
+                    avatarUrl: profileResponse.data?.data.avatarUrl || DEFAULT_AVATAR
+                  };
+                }
+                return user;
+              });
+            });
+            
+            // 채팅 메시지에서 현재 사용자 아바타 업데이트
+            setChatMessages(prev => {
+              return prev.map(msg => {
+                if (msg.senderId === String(userData.id)) {
+                  return {
+                    ...msg,
+                    avatarUrl: profileResponse.data?.data.avatarUrl || DEFAULT_AVATAR
+                  };
+                }
+                return msg;
+              });
+            });
+          }
+        }
+      }
+      
+      // 2. 웹소켓 이용해 로비 사용자 목록 새로고침
+      if (stompClient && stompClient.connected) {
+        publish("/app/lobby/users", {});
+      }
+      
+      // 3. 성공 메시지 표시
+      setToast({
+        type: "success",
+        message: "아바타가 성공적으로 적용되었습니다.",
+        duration: 3000
+      });
+    } catch (error) {
+      console.error("아바타 적용 후 데이터 갱신 실패:", error);
+      
+      // 기본 재시도만 수행
+      fetchCurrentUser();
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-8 flex flex-col h-full">
       {/* 토스트 메시지 표시 */}
@@ -2107,7 +2208,7 @@ const initializeWebSocket = async () => {
               </button>
               
               <button 
-                onClick={() => alert("상점 기능은 준비 중입니다.")} 
+                onClick={toggleShopModal} 
                 className="group relative px-4 py-2 rounded-lg hover:bg-gray-700/50 transition-all"
               >
                 <div className="flex flex-col items-center">
@@ -2332,7 +2433,7 @@ const initializeWebSocket = async () => {
                     <div className="w-8 h-8 rounded-full border border-gray-700 overflow-hidden">
                       {user.avatarUrl ? (
                         <img 
-                          src={user.avatarUrl} 
+                          src={userProfileCache[user.id]?.avatarUrl || user.avatarUrl} 
                           alt={user.nickname} 
                           className="w-full h-full object-cover"
                           onError={(e) => {
@@ -2434,7 +2535,7 @@ const initializeWebSocket = async () => {
                         <div className="w-5 h-5 rounded-full overflow-hidden bg-gray-800">
                           {msg.avatarUrl ? (
                             <img 
-                              src={msg.avatarUrl} 
+                              src={userProfileCache[msg.senderId]?.avatarUrl || msg.avatarUrl} 
                               alt={msg.senderName}
                               className="w-full h-full object-cover"
                               onError={(e) => {
@@ -3237,6 +3338,15 @@ const initializeWebSocket = async () => {
           </div>
         </div>
       )}
+
+      {/* 상점 모달 */}
+      <ShopModal 
+        isOpen={showShopModal} 
+        onClose={toggleShopModal}
+        currentPoints={userProfileCache[currentUser?.id || 0]?.point || 0}
+        onAvatarPurchased={handleAvatarPurchased}
+        userId={currentUser?.id}
+      />
     </div>
   );
 }
