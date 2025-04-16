@@ -155,13 +155,13 @@ const ShopModal: React.FC<ShopModalProps> = ({
           </svg>
         </button>
 
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-white">아바타 상점</h2>
-          <div className="text-yellow-400 font-semibold flex items-center">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+        <div className="flex flex-col mb-6">
+          <h2 className="text-2xl font-bold text-white mb-2">아바타 상점</h2>
+          <div className="bg-gray-700/70 px-4 py-2 rounded-lg inline-flex items-center self-start">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
             </svg>
-            <span>{points.toLocaleString()} 포인트</span>
+            <span className="font-semibold text-yellow-400">{points.toLocaleString()} 포인트</span>
           </div>
         </div>
 
