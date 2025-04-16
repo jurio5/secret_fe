@@ -971,9 +971,52 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
     if (playerScores.length === 1) {
       setShowResults(true);
       
-      // 단일 플레이어 모드에서도 점수를 즉시 반영하지 않고 약간의 딜레이 후 반영
+      // 단일 플레이어 모드에서 점수를 즉시 적용 (수정된 부분)
+      const isCorrect = selectedAnswerIndex === correctAnswerIndex;
+      
+      // 점수를 직접 업데이트 (pendingScores를 거치지 않고)
+      setPlayerScores(prevScores => 
+        prevScores.map(player => {
+          if (player.id === currentUserId.toString()) {
+            console.log(`단일 플레이어 점수 직접 업데이트: ${player.score} + ${scoreToAdd} = ${player.score + scoreToAdd}`);
+            return { 
+              ...player, 
+              score: player.score + scoreToAdd, 
+              lastAnswerCorrect: isCorrect 
+            };
+          }
+          return player;
+        })
+      );
+      
+      // 또한 pendingScores에도 저장 (다른 부분에서 사용할 수 있으므로)
       setTimeout(() => {
+        // 로그 추가하여 확인
+        console.log("단일 플레이어 모드 점수 적용:", pendingScores);
         applyPendingScores();
+        
+        // 성공 메시지 (정답인 경우만)
+        if (isCorrect && scoreToAdd > 0) {
+          // 토스트 메시지로 획득 점수 표시
+          toast.success(`정답입니다! +${scoreToAdd}점`, {
+            duration: 2000,
+            icon: '✓'
+          });
+        }
+
+        // 단일 플레이어일 경우 답변 제출 후 3초 후 자동으로 다음 문제로 이동
+        const isLastQuestion = checkIsLastQuestion();
+        setTimeout(() => {
+          if (isLastQuestion) {
+            // 마지막 문제면 게임 종료 처리
+            console.log("마지막 문제였습니다. 게임을 종료합니다.");
+            finishGame();
+          } else {
+            // 그렇지 않으면 다음 문제로 강제 이동
+            console.log("단일 플레이어 모드: 다음 문제로 자동 이동합니다.");
+            moveToNextQuestion();
+          }
+        }, 2000);
       }, 500);
     }
     
@@ -1530,6 +1573,65 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
       console.log("새 문제 시작 시간 기록:", Date.now());
     }
   }, [gameStatus, currentQuestion]);
+  
+  // 타이머 관리 및 플레이어 수 감지
+  useEffect(() => {
+    // 게임 상태가 IN_PROGRESS가 아니면 타이머를 시작하지 않음
+    if (gameStatus !== "IN_PROGRESS") return;
+    
+    // 타이머 시작
+    const interval = setInterval(() => {
+      setTimeLeft(prevTime => {
+        // 타이머가 0이 되면 타이머 종료
+        if (prevTime <= 0) {
+          clearInterval(interval);
+          handleTimerExpired();
+          return 0;
+        }
+        
+        // 타이머 감소
+        return prevTime - 1;
+      });
+    }, 1000);
+    
+    // 단일 플레이어 모드 감지 및 처리 - 이 부분이 중요
+    if (playerScores.length === 1 && showResults && answerSubmitted) {
+      console.log("단일 플레이어 모드에서 자동 진행 로직 활성화");
+      
+      // 점수가 제대로 반영되었는지 확인
+      const currentPlayerScore = playerScores.find(p => p.id === currentUserId.toString())?.score || 0;
+      console.log("현재 플레이어 점수:", currentPlayerScore);
+      
+      // 모든 pendingScores 강제 적용
+      if (Object.keys(pendingScores).length > 0) {
+        console.log("단일 플레이어 모드 - 남은 점수 적용:", pendingScores);
+        setTimeout(() => {
+          applyPendingScores();
+        }, 300);
+      }
+      
+      // 답변 제출 후 3초 후 자동으로 다음 문제로 이동
+      const autoProgressTimer = setTimeout(() => {
+        const isLastQuestion = checkIsLastQuestion();
+        if (isLastQuestion) {
+          console.log("단일 플레이어 모드: 마지막 문제였습니다. 게임을 종료합니다.");
+          finishGame();
+        } else {
+          console.log("단일 플레이어 모드: 자동으로 다음 문제로 이동합니다.");
+          moveToNextQuestion();
+        }
+      }, 3000);
+      
+      // cleanup 함수에서 타이머 제거
+      return () => {
+        clearInterval(interval);
+        clearTimeout(autoProgressTimer);
+      };
+    }
+    
+    // 컴포넌트 언마운트 시 타이머 정리
+    return () => clearInterval(interval);
+  }, [gameStatus, timeLeft, playerScores.length, showResults, answerSubmitted]);
   
   // 게임 대기 화면
   if (gameStatus === "WAITING") {
