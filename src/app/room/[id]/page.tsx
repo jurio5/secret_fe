@@ -159,7 +159,17 @@ export default function RoomPage() {
   // 현재 사용자 정보 가져오기
   const fetchCurrentUser = async () => {
     try {
-      const response = await client.GET("/api/v1/members/me", {}) as any;
+      // 캐시 방지 헤더 추가
+      const customHeaders = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Request-Time": Date.now().toString() // 무작위 헤더 값으로 캐시 방지
+      };
+      
+      const response = await client.GET("/api/v1/members/me", {
+        headers: customHeaders
+      }) as any;
       
       if (response.error) {
         console.error("사용자 정보를 가져오는데 실패했습니다:", response.error);
@@ -169,6 +179,24 @@ export default function RoomPage() {
       if (response.data?.data) {
         const userData = response.data.data;
         setCurrentUserId(userData.id);
+        
+        console.log("원본 사용자 정보 및 아바타 URL:", userData.nickname, userData.avatarUrl);
+        
+        // 프로필 정보 추가 요청으로 최신 아바타 URL 가져오기
+        try {
+          const profileResponse = await client.GET(`/api/v1/members/{memberId}`, {
+            params: { path: { memberId: userData.id } },
+            headers: customHeaders
+          }) as any;
+          
+          if (profileResponse.data?.data && profileResponse.data.data.avatarUrl) {
+            userData.avatarUrl = profileResponse.data.data.avatarUrl;
+            console.log("사용자 프로필에서 아바타 URL 가져옴:", userData.avatarUrl);
+          }
+        } catch (profileError) {
+          console.error("프로필 정보를 가져오는데 실패했습니다:", profileError);
+        }
+        
         setCurrentUser(userData);
         
         // 방장 여부 확인
@@ -176,7 +204,7 @@ export default function RoomPage() {
           setIsOwner(true);
         }
         
-        console.log("사용자 정보 반환:", userData.nickname);
+        console.log("최종 사용자 정보:", userData.nickname, "아바타 URL:", userData.avatarUrl);
         return userData; // 사용자 정보 반환
       }
       return null;
@@ -536,6 +564,9 @@ export default function RoomPage() {
           return;
         }
         
+        console.log("채팅 메시지 수신 (처리 전):", message);
+        console.log("현재 사용자 정보:", currentUser);
+        
         // 처리할 메시지 객체 초기화
         let processedMessage;
         
@@ -570,13 +601,32 @@ export default function RoomPage() {
               roomId: roomId
             };
           } else {
-            // 일반 채팅 메시지
-            // 보낸 사용자가 현재 사용자가 아니면 다른 플레이어들 중에서 찾기
-            if (currentUser && message !== newChatMessage.trim()) {
+            // 내가 방금 보낸 메시지인지 확인 (보낸 메시지와 동일한 내용인지)
+            const isMyMessage = content === newChatMessage.trim() || 
+                                (currentUser && message === newChatMessage.trim());
+            
+            console.log("메시지 내용 비교:", {
+              "받은 내용": content,
+              "내가 보낸 내용": newChatMessage.trim(),
+              "내 메시지 여부": isMyMessage
+            });
+            
+            if (isMyMessage && currentUser) {
+              // 내가 보낸 메시지
+              processedMessage = {
+                type: "CHAT",
+                content: content,
+                senderId: String(currentUser.id),
+                senderName: currentUser.nickname,
+                avatarUrl: currentUser.avatarUrl || DEFAULT_AVATAR,
+                timestamp: Date.now(),
+                roomId: roomId
+              };
+              
+              console.log("내 메시지로 처리됨:", processedMessage);
+            } else {
               // 다른 플레이어가 보낸 메시지
-              // players 배열에서 가장 최근에 활동한 플레이어를 찾아 그 사용자를 발신자로 설정
-              // (정확한 발신자를 알 수 없으므로 휴리스틱 사용)
-              const sender = players.find(p => p.id !== currentUser.id.toString());
+              const sender = players.find(p => p.id !== String(currentUser?.id));
               
               processedMessage = {
                 type: "CHAT",
@@ -587,17 +637,8 @@ export default function RoomPage() {
                 timestamp: Date.now(),
                 roomId: roomId
               };
-            } else {
-              // 현재 사용자가 보낸 메시지
-              processedMessage = {
-                type: "CHAT",
-                content: content,
-                senderId: currentUser?.id || "unknown",
-                senderName: currentUser?.nickname || "사용자",
-                avatarUrl: currentUser?.avatarUrl || DEFAULT_AVATAR,
-                timestamp: Date.now(),
-                roomId: roomId
-              };
+              
+              console.log("다른 사용자 메시지로 처리됨:", processedMessage);
             }
           }
         } else {
@@ -1666,6 +1707,25 @@ export default function RoomPage() {
         const userData = await fetchCurrentUser();
         if (userData) {
           await fetchRoomData();
+          
+          // 플레이어 목록에 현재 사용자 아바타 URL 강제 적용
+          setTimeout(() => {
+            if (userData.avatarUrl) {
+              setPlayers(prevPlayers => {
+                return prevPlayers.map(player => {
+                  if (player.id === String(userData.id)) {
+                    console.log(`아바타 URL 강제 적용: ${userData.nickname}, ${userData.avatarUrl}`);
+                    return {
+                      ...player,
+                      avatarUrl: userData.avatarUrl
+                    };
+                  }
+                  return player;
+                });
+              });
+            }
+          }, 500); // 플레이어 목록이 로딩된 후 적용
+          
           console.log("방 입장 처리 완료");
         }
       } catch (error) {
@@ -1773,6 +1833,90 @@ export default function RoomPage() {
     
     return () => clearInterval(timer);
   }, [isOwner]);
+
+  // 컴포넌트 마운트 시 초기화
+  useEffect(() => {
+  console.log("컴포넌트 마운트, 방 ID:", roomId);
+  let isLeaving = false;
+  
+  // 방 입장 시 초기화 수행
+  const initRoom = async () => {
+    try {
+      // 1. 방 정보 불러오기
+      await fetchRoomData();
+      
+      // 2. 현재 사용자 정보 불러오기
+      const userData = await fetchCurrentUser();
+      
+      if (!userData) {
+        console.error("사용자 정보를 가져오는데 실패했습니다.");
+        setError("사용자 정보를 불러오는데 실패했습니다. 로그인 후 다시 시도해주세요.");
+        return;
+      }
+      
+      console.log("방 입장 - 현재 사용자:", userData.nickname, "아바타:", userData.avatarUrl);
+      
+      // 아바타 URL이 없으면 기본 아바타 설정
+      if (!userData.avatarUrl) {
+        userData.avatarUrl = DEFAULT_AVATAR;
+        console.log("기본 아바타 설정:", DEFAULT_AVATAR);
+      }
+      
+      // 현재 사용자 ID는 정수형이 원본이므로 비교를 위해 문자열로 변환
+      const currentUserIdStr = String(userData.id);
+      
+      // 방장 여부 설정 (수동으로 방장 여부 체크)
+      if (room && room.ownerId === userData.id) {
+        setIsOwner(true);
+        console.log("현재 사용자는 방장입니다.");
+      }
+      
+      // 3. 웹소켓 설정
+      setupWebSocket();
+      
+      // 4. 초기 메시지 추가
+      setChatMessages(prev => [
+        ...prev, 
+        {
+          type: "SYSTEM",
+          content: "채팅에 연결되었습니다.",
+          senderId: "system",
+          senderName: "System",
+          timestamp: Date.now(),
+          roomId: roomId
+        }
+      ]);
+      
+      // 5. 잠시 후 플레이어 목록에 현재 플레이어 존재 여부 체크하고 아바타 강제 업데이트
+      setTimeout(() => {
+        if (userData) {
+          // 플레이어 목록에 현재 사용자 아바타 강제 적용
+          setPlayers(prevPlayers => {
+            // 로그 추가
+            console.log("플레이어 목록 현재 상태:", prevPlayers.map(p => `${p.id} (${p.nickname}): ${p.avatarUrl}`));
+            
+            return prevPlayers.map(player => {
+              if (player.id === String(userData.id)) {
+                console.log(`아바타 URL 강제 적용: ${userData.nickname}, ${userData.avatarUrl}`);
+                return {
+                  ...player,
+                  avatarUrl: userData.avatarUrl || DEFAULT_AVATAR
+                };
+              }
+              return player;
+            });
+          });
+        }
+      }, 500); // 플레이어 목록이 로딩된 후 적용
+      
+      console.log("방 입장 처리 완료");
+    } catch (error) {
+      console.error("방 입장 초기화 중 오류:", error);
+    }
+  };
+  
+  initRoom();
+  }, [roomId]);
 
   if (loading) {
     return (
@@ -1914,9 +2058,12 @@ export default function RoomPage() {
                         >
                           <div className="relative">
                             <img 
-                              src={player.avatarUrl || DEFAULT_AVATAR} 
+                              src={player.id === String(currentUser?.id) ? currentUser?.avatarUrl : player.avatarUrl || DEFAULT_AVATAR} 
                               alt={player.nickname} 
                               className="w-10 h-10 rounded-full"
+                              onError={(e) => { 
+                                (e.target as HTMLImageElement).src = DEFAULT_AVATAR; 
+                              }}
                             />
                             {player.isOwner && (
                               <div className="absolute -top-1 -right-1 bg-yellow-500 rounded-full w-5 h-5 flex items-center justify-center">
@@ -1967,39 +2114,74 @@ export default function RoomPage() {
                       ref={chatContainerRef}
                       className="flex-grow space-y-3 overflow-y-auto max-h-[calc(100vh-400px)] pr-1 mb-4"
                     >
-                      {chatMessages.map((msg, index) => (
-                        <div key={index} className={`${msg.type === 'SYSTEM' ? 'flex justify-center' : 'flex items-start'}`}>
-                          {msg.type === 'SYSTEM' ? (
-                            <div className="bg-gray-700/40 text-gray-300 px-3 py-1.5 rounded-md text-sm text-center max-w-[80%]">
-                              {msg.content}
-                            </div>
-                          ) : (
-                            <>
-                              <img 
-                                src={msg.avatarUrl || DEFAULT_AVATAR} 
-                                alt={msg.senderName} 
-                                className="w-8 h-8 rounded-full mr-2 mt-1" 
-                                onError={(e) => { 
-                                  (e.target as HTMLImageElement).src = DEFAULT_AVATAR; 
-                                }}
-                              />
-                              <div className={`max-w-[70%] ${msg.senderId === String(currentUser?.id) ? 'bg-blue-600/40 text-blue-100' : 'bg-gray-700/60 text-white'} px-3 py-2 rounded-lg`}>
-                                <div className="text-xs text-gray-300 mb-1 flex justify-between">
-                                  <span>{msg.senderName}</span>
-                                  <span className="ml-4 opacity-70">
-                                    {new Date(msg.timestamp).toLocaleTimeString('ko-KR', {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                      hour12: false
-                                    })}
-                                  </span>
-                                </div>
-                                <div className="text-sm break-words">{msg.content}</div>
+                      {chatMessages.map((msg, index) => {
+                        // JSON 문자열인지 확인하고 파싱
+                        let displayMsg = { ...msg };
+                        
+                        if (typeof msg.content === 'string' && (
+                            msg.content.startsWith('{') || 
+                            msg.content.startsWith('{"type":')
+                          )) {
+                          try {
+                            // JSON 형식이면 파싱
+                            const parsedContent = JSON.parse(msg.content);
+                            if (parsedContent.content) {
+                              displayMsg.content = parsedContent.content;
+                            }
+                          } catch (e) {
+                            // 파싱 실패시 원본 메시지 유지
+                            console.warn("JSON 파싱 실패:", e);
+                          }
+                        }
+
+                        return (
+                          <div key={index} className={`${msg.type === 'SYSTEM' ? 'flex justify-center' : 'flex items-start'}`}>
+                            {msg.type === 'SYSTEM' ? (
+                              <div className="bg-gray-700/40 text-gray-300 px-3 py-1.5 rounded-md text-sm text-center max-w-[80%]">
+                                {displayMsg.content}
                               </div>
-                            </>
-                          )}
-                        </div>
-                      ))}
+                            ) : (
+                              <>
+                                {/* 아바타 표시 - 내 메시지일 때는 항상 현재 사용자 아바타 사용 */}
+                                <img 
+                                  src={
+                                    // 내 메시지인지 확인 (ID가 같은지, 이름이 같은지)
+                                    msg.senderId === String(currentUser?.id) ||
+                                    msg.senderName === currentUser?.nickname 
+                                      ? currentUser?.avatarUrl || DEFAULT_AVATAR // 내 아바타
+                                      : msg.avatarUrl || DEFAULT_AVATAR // 원래 메시지의 아바타
+                                  } 
+                                  alt={msg.senderName} 
+                                  className="w-8 h-8 rounded-full mr-2 mt-1" 
+                                  onError={(e) => { 
+                                    console.log("아바타 로딩 실패:", e);
+                                    (e.target as HTMLImageElement).src = DEFAULT_AVATAR; 
+                                  }}
+                                />
+                                <div className={`max-w-[70%] ${
+                                  // 내 메시지인지 확인 (ID가 같은지, 이름이 같은지)
+                                  msg.senderId === String(currentUser?.id) ||
+                                  msg.senderName === currentUser?.nickname 
+                                    ? 'bg-blue-600/40 text-blue-100' 
+                                    : 'bg-gray-700/60 text-white'
+                                } px-3 py-2 rounded-lg`}>
+                                  <div className="text-xs text-gray-300 mb-1 flex justify-between">
+                                    <span>{msg.senderName}</span>
+                                    <span className="ml-4 opacity-70">
+                                      {new Date(msg.timestamp).toLocaleTimeString('ko-KR', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        hour12: false
+                                      })}
+                                    </span>
+                                  </div>
+                                  <div className="text-sm break-words">{displayMsg.content}</div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                     
                     {/* 채팅 입력 영역 */}
