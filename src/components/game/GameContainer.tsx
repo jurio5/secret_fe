@@ -1823,10 +1823,20 @@ export default function GameContainer({ roomId, currentUserId, players, room, on
                 });
               }
               
-              // 약간의 지연 후 새로고침
-              setTimeout(() => {
-                window.location.reload();
-              }, 500);
+              // 솔로 플레이 여부 확인
+              const isSoloPlay = playerScores.length === 1;
+              
+              if (isSoloPlay) {
+                // 솔로 플레이일 경우 직접 로비로 이동
+                console.log("솔로 플레이 - 로비로 직접 이동");
+                window.location.href = "/lobby";
+              } else {
+                // 멀티 플레이일 경우 기존 방식으로 새로고침
+                console.log("멀티 플레이 - 페이지 새로고침");
+                setTimeout(() => {
+                  window.location.reload();
+                }, 500);
+              }
             }}
           >
             <FaHome className="text-lg" />
