@@ -75,12 +75,12 @@ const ShopModal: React.FC<ShopModalProps> = ({
   };
 
   const handleEquip = async (avatarId: number) => {
-    console.log(`아바타 ID ${avatarId} 장착 요청`);
+    setIsEquipping(true);
     try {
-      const success = await equipAvatar(avatarId);
+      const result = await equipAvatar(avatarId);
       
-      if (success) {
-        toast.success('아바타가 성공적으로 변경되었습니다!');
+      if (result.success) {
+        toast.success(result.message || '아바타가 성공적으로 변경되었습니다!');
         
         // 유저 프로필 캐시 업데이트를 위해 콜백 호출
         if (onAvatarPurchased) {
@@ -109,8 +109,6 @@ const ShopModal: React.FC<ShopModalProps> = ({
               timestamp: Date.now()
             });
             
-            console.log("아바타 변경 웹소켓 메시지 발행:", roomId);
-            
             // 모달 닫기
             onClose();
             
@@ -130,14 +128,14 @@ const ShopModal: React.FC<ShopModalProps> = ({
         setActiveTab('owned');
         loadData();
       } else {
-        console.error("아바타 장착 실패");
-        
-        // 상세 에러 로그 확인을 위한 안내 메시지
-        toast.error("아바타 장착에 실패했습니다. 콘솔을 확인해주세요 (F12)");
+        // 실패 메시지가 있으면 표시, 없으면 기본 메시지 표시
+        toast.error(result.message || '아바타 장착에 실패했습니다');
       }
     } catch (error) {
       console.error("아바타 장착 중 오류:", error);
-      toast.error("아바타 장착에 실패했습니다. 콘솔을 확인해주세요 (F12)");
+      toast.error("아바타 장착에 실패했습니다");
+    } finally {
+      setIsEquipping(false);
     }
   };
 

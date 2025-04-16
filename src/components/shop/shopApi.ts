@@ -122,7 +122,7 @@ export const getUserPoints = async (userId?: number): Promise<number> => {
 };
 
 // 아바타 장착
-export const equipAvatar = async (avatarId: number, userId?: number): Promise<boolean> => {
+export const equipAvatar = async (avatarId: number, userId?: number): Promise<{ success: boolean; message?: string }> => {
   try {
     // userId가 제공되지 않은 경우 현재 로그인한 사용자 정보를 가져옴
     let memberId = userId;
@@ -147,12 +147,12 @@ export const equipAvatar = async (avatarId: number, userId?: number): Promise<bo
         }
       } catch (userError) {
         console.error('현재 사용자 정보를 가져오는데 실패했습니다:', userError);
-        throw new Error('사용자 정보를 가져오는데 실패했습니다. 다시 로그인해주세요.');
+        return { success: false, message: '사용자 정보를 가져오는데 실패했습니다. 다시 로그인해주세요.' };
       }
     }
     
     if (!memberId) {
-      throw new Error('사용자 ID를 찾을 수 없습니다.');
+      return { success: false, message: '사용자 ID를 찾을 수 없습니다.' };
     }
     
     // 요청 헤더 추가
@@ -161,30 +161,44 @@ export const equipAvatar = async (avatarId: number, userId?: number): Promise<bo
       'Cache-Control': 'no-cache'
     };
     
-    console.log(`아바타 장착 요청: PATCH /api/v1/members/${memberId}/avatars/${avatarId}`);
-    
     // client를 any로 타입 캐스팅하여 사용
     const response = await fetchWithAuthErrorHandling(
       () => (client as any).PATCH(`/api/v1/members/${memberId}/avatars/${avatarId}`, { headers })
     ) as any;
-
-    console.log('아바타 장착 응답:', JSON.stringify(response, null, 2));
     
+    // 오류 응답 처리
     if (response.error) {
-      console.error('아바타 장착 실패 응답:', response.error);
-      return false;
+      const errorMsg = response.error.msg || 
+                      response.error.error?.msg || 
+                      '아바타 장착에 실패했습니다.';
+      return { success: false, message: errorMsg };
     }
     
-    // 백엔드 응답에 맞게 성공 여부 체크 로직 수정
-    // 실제 응답은 response.data.resultCode가 'OK'인 형태
-    return response.data?.resultCode === 'OK' || 
-           response.data?.status === 'success' || 
-           response.status === 200;
+    // 백엔드가 400 에러를 반환했지만 그 안에 메시지가 있는 경우
+    if (response.data?.error) {
+      return { 
+        success: false, 
+        message: response.data.error.msg || '아바타 장착에 실패했습니다.' 
+      };
+    }
+    
+    // 성공
+    return { 
+      success: response.data?.resultCode === 'OK' || 
+              response.data?.status === 'success' || 
+              response.status === 200,
+      message: '아바타가 성공적으로 변경되었습니다!'
+    };
   } catch (error: any) {
-    console.error('아바타 장착 오류 세부정보:', error);
-    console.error('오류 메시지:', error.message);
-    console.error('오류 응답:', error.response?.data);
-    console.error('오류 상태코드:', error.response?.status);
-    return false;
+    // 에러 응답에서 메시지 추출
+    let errorMessage = '아바타 장착에 실패했습니다.';
+    
+    if (error.response?.data?.error?.msg) {
+      errorMessage = error.response.data.error.msg;
+    } else if (error.error?.msg) {
+      errorMessage = error.error.msg;
+    }
+    
+    return { success: false, message: errorMessage };
   }
 }; 
